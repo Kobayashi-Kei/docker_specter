@@ -3,16 +3,19 @@ import traceback
 import lineNotifier
 from transformers import AutoTokenizer
 import os
-from pretrain_lstm import Specter
 import time
 import shutil
 import glob
 
+# 使いたいモデルをimport する
+from pretrain_max_pooling import Specter
+
 
 def main():
     # 以下をモデルに合わせて変更する
-    modelType = "lstm"
-    modelParamPath = f"save/lstm-47/checkpoints/*"
+    modelType = "pooling"
+    modelParamPath = "save/version_pooling/checkpoints"
+    modelParamPath = modelParamPath + "/*"
 
     # モデルパラメータのパス
     epoch = 1
