@@ -368,7 +368,10 @@ class Specter(pl.LightningModule):
 
         # max_poolingを取って、765×単語数の行列を765×1に変換する　(参考 https://www.ai-shift.co.jp/techblog/2145)
         # dim=0だと、列の最大値を取る（ベクトルの次元=765)、dim=1だと行の最大値を取る（ベクトルの次元=単語数）
-        sequence_output, _ = source_embedding['last_hidden_state'].max(dim=0)
+        # -> 以下の実装だと、もしかして上手く行っていないのでは？
+        # -> 上手く行っていない、バッチで入力されることを考慮して、dim=1とするべきだった
+        # sequence_output, _ = source_embedding['last_hidden_state'].max(dim=0)
+        sequence_output, _ = source_embedding['last_hidden_state'].max(dim=1)
 
         return sequence_output
 
