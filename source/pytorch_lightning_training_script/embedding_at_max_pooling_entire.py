@@ -104,7 +104,7 @@ def main():
 
         # ファイル出力
         # labeledAbstSpecter.jsonの名称は評価プログラムでも使っているため変更しない
-        with open(outputEmbeddingDirPath + "labeledAbstSpecter.json", 'w') as f:
+        with open(outputEmbeddingDirPath + "titleAbstSpecter.json", 'w') as f:
             json.dump(outputTitleAbstEmbedding, f, indent=4)
 
         message = "【完了】" + os.path.basename(__file__)
