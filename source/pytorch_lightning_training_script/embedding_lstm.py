@@ -206,6 +206,7 @@ def main():
             # 観点ごとのBERT出力をLSTMに通す
             for label in labelList:
                 if len(label_last_hideen_state[label]) == 0:
+                    labeledAbstEmbedding[title][label] = None
                     continue
                 # print(label_last_hideen_state[label])
                 lstmInput = torch.tensor(

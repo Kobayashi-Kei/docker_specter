@@ -24,7 +24,7 @@ SPECTER + LSTM を用いて、観点ごとの論文埋め込みを取得する
 def main():
     # 以下をモデルに合わせて変更する
     modelType = "pooling"
-    # modelParamPath = f"save/version_pooling_dimMiss/checkpoints/*"
+    modelParamPath = f"save/version_pooling/checkpoints/*"
 
     # Axcellのデータサイズ(基本medium)
     size = "medium"
@@ -214,6 +214,7 @@ def main():
             # 観点ごとのBERT出力でmax pooling
             for label in labelList:
                 if len(label_last_hideen_state[label]) == 0:
+                    labeledAbstEmbedding[title][label] = None
                     continue
                 # print(label_last_hideen_state[label])
                 # poolingInput = torch.tensor(
