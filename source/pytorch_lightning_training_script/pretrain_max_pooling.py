@@ -368,9 +368,28 @@ class Specter(pl.LightningModule):
 
         # max_poolingを取って、765×単語数の行列を765×1に変換する　(参考 https://www.ai-shift.co.jp/techblog/2145)
         # dim=0だと、列の最大値を取る（ベクトルの次元=765)、dim=1だと行の最大値を取る（ベクトルの次元=単語数）
-        # -> 以下の実装だと、もしかして上手く行っていないのでは？
-        # -> 上手く行っていない、バッチで入力されることを考慮して、dim=1とするべきだった
+
+        # 以下の通り、3次元の場合はdim=0だと、行列が変わらない
+        # >>> a
+        # tensor([[[1, 2, 3],
+        #         [3, 2, 1]]])
+        # >>> a = torch.tensor(a)
+        # >>> a.max(dim=0)
+        # torch.return_types.max(
+        # values=tensor([[1, 2, 3],
+        #         [3, 2, 1]]),
+        # indices=tensor([[0, 0, 0],
+        #         [0, 0, 0]]))
+        # >>> a.max(dim=1)
+        # torch.return_types.max(
+        # values=tensor([[3, 2, 3]]),
+        # indices=tensor([[1, 0, 0]]))
+
+        # -> バッチの場合、行列の配列で入ってくるから、dim=0にしないといけない
+        # -> 以下の実装だと、だめだった
         # sequence_output, _ = source_embedding['last_hidden_state'].max(dim=0)
+
+        # -> バッチで入力されることを考慮して、dim=1とする（推論をバッチで行わない場合はdim=0でOK）
         sequence_output, _ = source_embedding['last_hidden_state'].max(dim=1)
 
         return sequence_output
