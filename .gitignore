@@ -179,3 +179,4 @@ pyrightconfig.json
 src
 save
 *.out
+pretrain_conv.py

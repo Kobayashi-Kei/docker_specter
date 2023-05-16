@@ -45,6 +45,12 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+"""
+SPECTERの学習データを用いてSciBERTの初期値から学習を行う
+手法: SPECTER + Max Pooling を用いて、BERTの最終層の全ての出力を用いて
+    論文埋め込みとする
+"""
+
 # Globe constants
 training_size = 684100
 # validation_size = 145375

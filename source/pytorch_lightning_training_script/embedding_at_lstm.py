@@ -17,7 +17,8 @@ import lineNotifier
 from pretrain_lstm import Specter
 
 """
-SPECTER + LSTM を用いて、観点ごとの論文埋め込みを取得する
+SPECTER + LSTM を用いて、BERTの最終層の全ての出力を用いて
+観点ごとの論文埋め込みを取得する
 """
 
 

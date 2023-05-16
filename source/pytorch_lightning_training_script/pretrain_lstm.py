@@ -44,6 +44,11 @@ import itertools
 import logging
 logger = logging.getLogger(__name__)
 
+"""
+SPECTERの学習データを用いてSciBERTの初期値から学習を行う
+手法: SPECTER + LSTM を用いて、BERTの最終層の全ての出力を用いて
+    論文埋め込みとする
+"""
 
 # Globe constants
 training_size = 684100
@@ -656,9 +661,9 @@ def main():
                 labelList = [args.label]
             else:
                 labelList = ["title", "bg", "obj", "method", "res"]
-                
+
             line_notify("172.21.:" + os.path.basename(__file__) + "が開始")
-            
+
             model = Specter(args)
 
             # default logger used by trainer
