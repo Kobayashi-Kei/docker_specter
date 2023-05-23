@@ -372,7 +372,7 @@ class Specter(pl.LightningModule):
         source_embedding = self.model(
             input_ids=input_ids, token_type_ids=token_type_ids, attention_mask=attention_mask)
 
-        sequence_output, _ = source_embedding['last_hidden_state'].mean(dim=1)
+        sequence_output = source_embedding['last_hidden_state'].mean(dim=1)
 
         return sequence_output
 

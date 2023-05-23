@@ -24,8 +24,8 @@ SPECTER + MaxPooling を用いて、BERTの最終層の全ての出力を用い�
 
 def main():
     # 以下をモデルに合わせて変更する
-    modelType = "pooling"
-    modelParamPath = f"save/version_pooling/checkpoints/*"
+    modelType = "average_pooling"
+    modelParamPath = f"../dataserver/model_outputs/specter/20230503/version_average_pooling/checkpoints/*"
 
     # Axcellのデータサイズ(基本medium)
     size = "medium"
@@ -222,7 +222,7 @@ def main():
                 #     label_last_hideen_state[label]).unsqueeze(0).to('cuda:0')
                 poolingInput = torch.tensor(
                     label_last_hideen_state[label]).to('cuda:0')
-                out, _ = poolingInput.mean(dim=0)
+                out = poolingInput.mean(dim=0)
                 # print(out)
                 # print(out.size())
                 # exit()
