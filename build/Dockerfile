@@ -39,7 +39,7 @@ RUN git config --global http.proxy http://proxy.cc.uec.ac.jp:8080 \
 COPY source/pytorch_lightning_training_script/requirements.txt /workspace/requirements.txt
 RUN pip install --upgrade pip 
 RUN pip install allennlp==0.9.0 pytorch-lightning==1.0.3\
-    && pip install overrides==3.1.0
+    && pip install overrides==3.1.0 && pip install wandb
 
 ENV NVIDIA_VISIBLE_DEVICES all
 ENV NVIDIA_DRIVER_CAPABILITIES utility,compute
