@@ -11,7 +11,7 @@ from transformers import AdamW
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import TensorBoardLogger
 import pytorch_lightning as pl
-from torch.utils.data import DataLoader, IterableDataset
+from torch.utils.data import DataLoader, Dataset
 import torch.nn.functional as F
 import torch.nn as nn
 import torch
@@ -64,10 +64,7 @@ arg_to_scheduler_metavar = "{" + ", ".join(arg_to_scheduler_choices) + "}"
 """
 自分で定義するデータセット
 """
-
-
-class MyData(IterableDataset):
-    # def __init__(self, data, tokenizer, size):
+class MyData(Dataset):
     def __init__(self, data, paper_dict, ssc_result_dict, label_dict, tokenizer, block_size=100):
         self.data_instances = data
         self.paper_dict = paper_dict
@@ -76,36 +73,12 @@ class MyData(IterableDataset):
         self.block_size = block_size
         self.label_dict = label_dict
 
-        # self.size = size
-        # self.max_length = max_length
+    def __len__(self):
+        return len(self.data_instances)
 
-    def __iter__(self):
-        worker_info = torch.utils.data.get_worker_info()
-        # for data_instance in self.data_instances:
-        #         yield self.retTransformersInput(data_instance, self.tokenizer)
-
-        if worker_info is None:
-            i = 0
-            for data_instance in self.data_instances:
-                yield self.retTransformersInput(data_instance, self.tokenizer)
-                i += 1
-                # debug
-                # if i > 10:
-                #     break
-        else:
-            worker_id = worker_info.id
-            num_workers = worker_info.num_workers
-            i = 0
-            for data_instance in self.data_instances:
-                if int(i / self.block_size) % num_workers != worker_id:
-                    i = i + 1
-                    pass
-                else:
-                    i = i + 1
-                    yield self.retTransformersInput(data_instance, self.tokenizer)
-                    # debug
-                    # if i > 10:
-                    #     break
+    def __getitem__(self, index):
+        data_instance = self.data_instances[index]
+        return self.retTransformersInput(data_instance, self.tokenizer)
 
     def retTransformersInput(self, data_instance, tokenizer):
         # print("data_instance: ", data_instance)
@@ -168,23 +141,17 @@ class MyData(IterableDataset):
 
         ret_source = {
             "input": source_input,
-            "position_label_list": source_position_label[1]
+            "position_label_list": torch.tensor(source_position_label[1])
         }
         ret_pos = {
             "input": pos_input,
-            "position_label_list": pos_position_label[1]
+            "position_label_list": torch.tensor(pos_position_label[1])
         }
         ret_neg = {
             "input": neg_input,
-            "position_label_list": neg_position_label[1]
+            "position_label_list": torch.tensor(neg_position_label[1])
         }
 
-        # ret_source = [source_input, source_position_label[1]]
-        # ret_pos = [pos_input, pos_position_label[1]]
-        # ret_neg = [neg_input, neg_position_label[1]]
-
-        # print(ret_source)
-        # exit()
 
         return ret_source, ret_pos, ret_neg
 
@@ -265,8 +232,6 @@ class MyData(IterableDataset):
 """
 ロス計算を行うモジュール
 """
-
-
 class TripletLoss(nn.Module):
     """
     Triplet loss: copied from  https://github.com/allenai/specter/blob/673346f9f76bcf422b38e0d1b448ef4414bcd4df/specter/model.py#L159 without any change
@@ -316,6 +281,14 @@ class TripletLoss(nn.Module):
         else:
             raise TypeError(
                 f"Unrecognized option for `distance`:{self.distance}")
+        #
+        # debug print
+        #
+        # print("query: ", query)
+        # print("positive: ", positive)
+        # print("distance_positive: ", distance_positive)
+        # print("distance_negative: ", distance_negative)
+        print("losses: ", losses)
 
         if self.reduction == 'mean':
             return losses.mean()
@@ -331,8 +304,6 @@ class TripletLoss(nn.Module):
 """
 モデルのクラス
 """
-
-
 class Specter(pl.LightningModule):
     def __init__(self, init_args):
         super().__init__()
@@ -355,6 +326,11 @@ class Specter(pl.LightningModule):
         self.tokenizer.model_max_length = self.model.config.max_position_embeddings
         self.hparams.seqlen = self.model.config.max_position_embeddings
         self.triple_loss = TripletLoss(margin=float(init_args.margin))
+        
+        # cosine類似度も試す
+        # self.triple_loss = TripletLoss(
+        #     distance='cosine', margin=float(init_args.margin))
+        
         # number of training instances
         self.training_size = None
         # number of testing instances
@@ -364,6 +340,8 @@ class Specter(pl.LightningModule):
         # This is a dictionary to save the embeddings for source papers in test step.
         self.embedding_output = {}
         self.lossList = []
+
+        self.debug = False
 
     def forward(self, input_ids, token_type_ids, attention_mask):
         # in lightning, forward defines the prediction/inference actions
@@ -375,7 +353,6 @@ class Specter(pl.LightningModule):
     このメソッドでallennlp用のデータをロードして、トークナイズまで行う（tokentype_id, attention_maskなど)
     -> つまりこのメソッドに関わる箇所を書き換えればいい。
     """
-
     def _get_loader(self, split):
         # 観点ごとのTripletは使わない
         # allLabelData = []
@@ -508,11 +485,28 @@ class Specter(pl.LightningModule):
         source_embedding = self.model(**batch[0]["input"])['last_hidden_state']
         pos_embedding = self.model(**batch[1]["input"])['last_hidden_state']
         neg_embedding = self.model(**batch[2]["input"])['last_hidden_state']
+        # last hidden stateのtensor形状は
+        # ( バッチサイズ, 系列長(512), 次元数(768) )
 
-        source_cls_embedding = source_embedding[0]
-        pos_cls_embedding = pos_embedding[0]
-        neg_cls_embedding = neg_embedding[0]
+        """
+        全体のロス計算
+        """
+        # [CLS]の位置のlast_hidden_stateを取り出す
+        # tensorの形状は (2, 768)
+        source_cls_embedding = source_embedding[:, 0, :]
+        pos_cls_embedding = pos_embedding[:,0,:]
+        neg_cls_embedding = neg_embedding[:, 0, :]
+        cls_loss = self.triple_loss(
+            source_cls_embedding, pos_cls_embedding, neg_cls_embedding)
+        #
+        # debug print
+        #
+        # print("source_embedding.size(): ", source_embedding.size())
+        # print("source_cls_embedding.size(): ", source_cls_embedding.size())
 
+        """
+        観点のロス計算
+        """
         source_label_pooling = self.label_pooling(
             source_embedding, batch[0]["position_label_list"])
         pos_label_pooling = self.label_pooling(
@@ -520,27 +514,32 @@ class Specter(pl.LightningModule):
         neg_label_pooling = self.label_pooling(
             neg_embedding, batch[2]["position_label_list"])
 
-        cls_loss = self.triple_loss(
-            source_cls_embedding, pos_cls_embedding, neg_cls_embedding)
-
         batch_label_loss = 0
         label_loss_calculated_count = 0
-        for b in range(len(source_label_pooling)):
+        for b in range(len(source_label_pooling)): # batchsizeの数だけループ
             label_loss = 0
             valid_label_list = []
             for label in self.hparams.label_dict:
                 if not source_label_pooling[b][label] == None and not pos_label_pooling[b][label] == None and not neg_label_pooling[b][label] == None:
                     valid_label_list.append(label)
-                    label_loss += self.triple_loss(
-                        source_label_pooling[b][label], pos_label_pooling[b][label], neg_label_pooling[b][label])
+                    # debug print
+                    print("--" , label)
+                    label_loss += self.triple_loss(source_label_pooling[b][label], pos_label_pooling[b][label], neg_label_pooling[b][label])
 
             if len(valid_label_list) > 0:
                 batch_label_loss += label_loss/len(valid_label_list)
                 label_loss_calculated_count += 1
+        
+        """
+        全体と観点のロスを足し合わせ
+        """
         if label_loss_calculated_count > 0:
             loss = cls_loss + batch_label_loss / label_loss_calculated_count
         else:
             loss = cls_loss
+        
+        if self.debug:
+            return {"loss": loss}
 
         lr_scheduler = self.trainer.lr_schedulers[0]["scheduler"]
 
@@ -672,10 +671,7 @@ class Specter(pl.LightningModule):
         for b in range(batch_size):
             label_pooling = {}
             last_hidden_state = batch_last_hidden_state[b]
-            # 以下の形式で格納されているため，全体ループして，batch numberで取得
-            # [tensor([0, 0], device='cuda:0'), tensor([1, 1], device='cuda:0'),
-            position_label_list = [batch_position[b]
-                                   for batch_position in batch_position_label_list]
+            position_label_list = batch_position_label_list[b]
             # print(position_label_list)
             label_last_hidden_state = {}
             for label in label_dict:
@@ -684,16 +680,16 @@ class Specter(pl.LightningModule):
             # 各単語のlast_hidden_stateを観点ごとのリストに格納
             # print("\n", batch_position_label_list[b])
             for i, label_tensor in enumerate(position_label_list):
-                num_label = str(label_tensor.item())
+                label_number = str(label_tensor.item()) # tensor -> str
                 # [CLS]と[SEP]の位置はskip
-                if num_label == "-1":
+                if label_number == "-1":
                     continue
                 # 文末以降は'0'埋めだから終わる
-                if num_label == '0':
+                if label_number == '0':
                     break
-                # tensorからintへ変換し，labelへ変換
-                label = num_label_dict[num_label]
-
+                # ex. "1" -> "bg"
+                label = num_label_dict[label_number]
+                # print(label)
                 label_last_hidden_state[label].append(
                     last_hidden_state[i])
 
@@ -703,6 +699,7 @@ class Specter(pl.LightningModule):
                 if len(label_last_hidden_state[label]) > 0:
                     label_last_hidden_state_tensor = torch.stack(
                         label_last_hidden_state[label])
+                    # print(label_last_hidden_state_tensor)
                     label_pooling[label] = label_last_hidden_state_tensor.mean(
                         dim=0)
                 else:
@@ -877,7 +874,9 @@ def main():
             # trainer = pl.Trainer(logger=logger,
             #                      checkpoint_callback=checkpoint_callback,
             #                      **extra_train_params)
-            wandb_logger = WandbLogger()
+            wandb_logger = WandbLogger(project="SPECTER-AveragePooling-entire-label",
+                                       tags=["SPECTER", "AveragePooling", "entire-label"])
+
             trainer = pl.Trainer(logger=wandb_logger,
                                  checkpoint_callback=checkpoint_callback,
                                  **extra_train_params)
