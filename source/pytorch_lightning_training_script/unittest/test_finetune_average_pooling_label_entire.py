@@ -7,7 +7,7 @@ from transformers.optimization import (
 )
 import sys
 sys.path.append("..")  # 親ディレクトリのパスを追加
-from pretrain_average_pooling_label_entire import MyData, Specter
+from finetune_average_pooling_label_entire import MyData, Specter
 import torch
 from torch.utils.data import DataLoader
 from transformers import AutoTokenizer

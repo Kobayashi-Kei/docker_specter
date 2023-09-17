@@ -24,8 +24,9 @@ SPECTER + LSTM を用いて、BERTの最終層の全ての出力を用いて
 
 def main():
     # 以下をモデルに合わせて変更する
-    modelType = "lstm"
-    modelParamPath = f"save/lstm-47/checkpoints/*"
+    # modelType = "lstm"
+    # modelParamPath = f"../dataserver/model_outputs/specter/20230503/version_lstm/checkpoints/"
+    modelParamPath = f"../dataserver/model_outputs/specter/20230503/version_lstm/checkpoints/ep-epoch=1_avg_val_loss-avg_val_loss=0.507.ckpt"
 
     # Axcellのデータサイズ(基本medium)
     size = "medium"

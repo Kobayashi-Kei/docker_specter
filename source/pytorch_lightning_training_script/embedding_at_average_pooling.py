@@ -14,18 +14,20 @@ from transformers import AutoTokenizer
 
 # my module
 import lineNotifier
-from pretrain_max_pooling import Specter
+from pretrain_average_pooling import Specter
 
 """
-SPECTER + MaxPooling を用いて、BERTの最終層の全ての出力を用いて
+SPECTER + Average Pooling を用いて、BERTの最終層の全ての出力を用いて
 観点ごとの論文埋め込みを取得する
 """
 
 
 def main():
     # 以下をモデルに合わせて変更する
-    modelType = "average_pooling"
-    modelParamPath = f"../dataserver/model_outputs/specter/20230503/version_average_pooling/checkpoints/*"
+    # modelType = "average_pooling"
+    # modelParamPath = f"../dataserver/model_outputs/specter/20230503/version_average_pooling/checkpoints/*"
+    modelType = "entire_and_label_3-7"
+    modelParamPath = f"../dataserver/model_outputs/specter/paper_entire_and_label_3-7/checkpoints/ep-epoch=1_avg_val_loss-avg_val_loss=0.221.ckpt"
 
     # Axcellのデータサイズ(基本medium)
     size = "medium"
@@ -212,7 +214,7 @@ def main():
                 label_last_hideen_state[label_positions[i]].append(
                     tensor.tolist())
 
-            # 観点ごとのBERT出力でmax pooling
+            # 観点ごとのBERT出力でaverage pooling
             for label in labelList:
                 if len(label_last_hideen_state[label]) == 0:
                     labeledAbstEmbedding[title][label] = None
