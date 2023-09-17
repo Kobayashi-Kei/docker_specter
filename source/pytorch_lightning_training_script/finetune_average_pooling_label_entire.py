@@ -60,6 +60,9 @@ arg_to_scheduler = {
 arg_to_scheduler_choices = sorted(arg_to_scheduler.keys())
 arg_to_scheduler_metavar = "{" + ", ".join(arg_to_scheduler_choices) + "}"
 
+# ここでLossの占める全体の割合を決める
+entire_loss_rate = 0.3
+
 
 """
 自分で定義するデータセット
@@ -534,7 +537,8 @@ class Specter(pl.LightningModule):
         全体と観点のロスを足し合わせ
         """
         if label_loss_calculated_count > 0:
-            loss = cls_loss + batch_label_loss / label_loss_calculated_count
+            loss = entire_loss_rate * cls_loss + \
+                (1 - entire_loss_rate) * (batch_label_loss / label_loss_calculated_count)
         else:
             loss = cls_loss
         
@@ -553,14 +557,34 @@ class Specter(pl.LightningModule):
         return {"loss": loss}
 
     def validation_step(self, batch, batch_idx):
+        # source_embedding = self.model(**batch[0])[1] # [1]はpooler_outputのこと　https://huggingface.co/docs/transformers/model_doc/bert#transformers.BertModel
+        # pos_embedding = self.model(**batch[1])[1]
+        # neg_embedding = self.model(**batch[2])[1]
         source_embedding = self.model(**batch[0]["input"])['last_hidden_state']
         pos_embedding = self.model(**batch[1]["input"])['last_hidden_state']
         neg_embedding = self.model(**batch[2]["input"])['last_hidden_state']
+        # last hidden stateのtensor形状は
+        # ( バッチサイズ, 系列長(512), 次元数(768) )
 
-        source_cls_embedding = source_embedding[0]
-        pos_cls_embedding = pos_embedding[0]
-        neg_cls_embedding = neg_embedding[0]
+        """
+        全体のロス計算
+        """
+        # [CLS]の位置のlast_hidden_stateを取り出す
+        # tensorの形状は (2, 768)
+        source_cls_embedding = source_embedding[:, 0, :]
+        pos_cls_embedding = pos_embedding[:, 0, :]
+        neg_cls_embedding = neg_embedding[:, 0, :]
+        cls_loss = self.triple_loss(
+            source_cls_embedding, pos_cls_embedding, neg_cls_embedding)
+        #
+        # debug print
+        #
+        # print("source_embedding.size(): ", source_embedding.size())
+        # print("source_cls_embedding.size(): ", source_cls_embedding.size())
 
+        """
+        観点のロス計算
+        """
         source_label_pooling = self.label_pooling(
             source_embedding, batch[0]["position_label_list"])
         pos_label_pooling = self.label_pooling(
@@ -568,27 +592,34 @@ class Specter(pl.LightningModule):
         neg_label_pooling = self.label_pooling(
             neg_embedding, batch[2]["position_label_list"])
 
-        cls_loss = self.triple_loss(
-            source_cls_embedding, pos_cls_embedding, neg_cls_embedding)
-
         batch_label_loss = 0
         label_loss_calculated_count = 0
-        for b in range(len(source_label_pooling)):
+        for b in range(len(source_label_pooling)):  # batchsizeの数だけループ
             label_loss = 0
             valid_label_list = []
             for label in self.hparams.label_dict:
                 if not source_label_pooling[b][label] == None and not pos_label_pooling[b][label] == None and not neg_label_pooling[b][label] == None:
                     valid_label_list.append(label)
+                    # debug print
+                    print("--", label)
                     label_loss += self.triple_loss(
                         source_label_pooling[b][label], pos_label_pooling[b][label], neg_label_pooling[b][label])
 
             if len(valid_label_list) > 0:
                 batch_label_loss += label_loss/len(valid_label_list)
                 label_loss_calculated_count += 1
+
+        """
+        全体と観点のロスを足し合わせ
+        """
         if label_loss_calculated_count > 0:
-            loss = cls_loss + batch_label_loss / label_loss_calculated_count
+            loss = entire_loss_rate * cls_loss + \
+                (1 - entire_loss_rate) * (batch_label_loss / label_loss_calculated_count)
         else:
             loss = cls_loss
+
+        if self.debug:
+            return {"loss": loss}
 
         self.log('val_loss', loss, on_step=True, on_epoch=False, prog_bar=True)
         return {'val_loss': loss}
