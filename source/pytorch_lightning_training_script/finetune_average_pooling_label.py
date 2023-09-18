@@ -62,8 +62,6 @@ arg_to_scheduler = {
 arg_to_scheduler_choices = sorted(arg_to_scheduler.keys())
 arg_to_scheduler_metavar = "{" + ", ".join(arg_to_scheduler_choices) + "}"
 
-# ここでLossの占める全体の割合を決める
-entire_loss_rate = 0.3
 
 
 """
@@ -322,12 +320,12 @@ class Specter(pl.LightningModule):
         self.hparams = init_args
 
         # SciBERTを初期値
-        # self.model = AutoModel.from_pretrained("allenai/scibert_scivocab_cased")
-        # self.tokenizer = AutoTokenizer.from_pretrained("allenai/scibert_scivocab_cased")
-
+        self.model = AutoModel.from_pretrained("allenai/scibert_scivocab_cased")
+        self.tokenizer = AutoTokenizer.from_pretrained("allenai/scibert_scivocab_cased")
+        
         # SPECTERを初期値とする場合
-        self.model = AutoModel.from_pretrained("allenai/specter")
-        self.tokenizer = AutoTokenizer.from_pretrained("allenai/specter")
+        # self.model = AutoModel.from_pretrained("allenai/specter")
+        # self.tokenizer = AutoTokenizer.from_pretrained("allenai/specter")
 
         self.tokenizer.model_max_length = self.model.config.max_position_embeddings
         self.hparams.seqlen = self.model.config.max_position_embeddings
@@ -495,22 +493,6 @@ class Specter(pl.LightningModule):
         # ( バッチサイズ, 系列長(512), 次元数(768) )
 
         """
-        全体のロス計算
-        """
-        # [CLS]の位置のlast_hidden_stateを取り出す
-        # tensorの形状は (2, 768)
-        source_cls_embedding = source_embedding[:, 0, :]
-        pos_cls_embedding = pos_embedding[:,0,:]
-        neg_cls_embedding = neg_embedding[:, 0, :]
-        cls_loss = self.triple_loss(
-            source_cls_embedding, pos_cls_embedding, neg_cls_embedding)
-        #
-        # debug print
-        #
-        # print("source_embedding.size(): ", source_embedding.size())
-        # print("source_cls_embedding.size(): ", source_cls_embedding.size())
-
-        """
         観点のロス計算
         """
         source_label_pooling = self.label_pooling(
@@ -537,13 +519,12 @@ class Specter(pl.LightningModule):
                 label_loss_calculated_count += 1
         
         """
-        全体と観点のロスを足し合わせ
+        一致する観点がなければlossは0
         """
         if label_loss_calculated_count > 0:
-            loss = entire_loss_rate * cls_loss + \
-                (1 - entire_loss_rate) * (batch_label_loss / label_loss_calculated_count)
+            loss = label_loss_calculated_count
         else:
-            loss = cls_loss
+            loss = 0
         
         if self.debug:
             return {"loss": loss}
@@ -568,22 +549,6 @@ class Specter(pl.LightningModule):
         neg_embedding = self.model(**batch[2]["input"])['last_hidden_state']
         # last hidden stateのtensor形状は
         # ( バッチサイズ, 系列長(512), 次元数(768) )
-
-        """
-        全体のロス計算
-        """
-        # [CLS]の位置のlast_hidden_stateを取り出す
-        # tensorの形状は (2, 768)
-        source_cls_embedding = source_embedding[:, 0, :]
-        pos_cls_embedding = pos_embedding[:, 0, :]
-        neg_cls_embedding = neg_embedding[:, 0, :]
-        cls_loss = self.triple_loss(
-            source_cls_embedding, pos_cls_embedding, neg_cls_embedding)
-        #
-        # debug print
-        #
-        # print("source_embedding.size(): ", source_embedding.size())
-        # print("source_cls_embedding.size(): ", source_cls_embedding.size())
 
         """
         観点のロス計算
@@ -613,13 +578,12 @@ class Specter(pl.LightningModule):
                 label_loss_calculated_count += 1
 
         """
-        全体と観点のロスを足し合わせ
+        一致する観点がなければlossは0
         """
         if label_loss_calculated_count > 0:
-            loss = entire_loss_rate * cls_loss + \
-                (1 - entire_loss_rate) * (batch_label_loss / label_loss_calculated_count)
+            loss = label_loss_calculated_count
         else:
-            loss = cls_loss
+            loss = 0
 
         if self.debug:
             return {"loss": loss}
