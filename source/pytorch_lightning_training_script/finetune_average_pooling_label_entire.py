@@ -35,8 +35,9 @@ import re
 from pytorch_lightning.loggers import WandbLogger
 
 """
-SPECTERを観点ごとのデータで1つのモデルを学習する
-（観点ごとにモデルを分けない）
+単語位置出力を観点ごとにaverage poolingして観点埋め込みを生成し，
+それと同時にCLSトークンの位置で論文全体埋め込みを取得，
+それぞれをLossに組み込んでFinetuning
 """
 
 logger = logging.getLogger(__name__)
