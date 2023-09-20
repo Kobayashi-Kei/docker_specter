@@ -33,11 +33,22 @@ import re
 
 # wandb
 from pytorch_lightning.loggers import WandbLogger
+import wandb
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+# import torch
+# import torch.nn as nn
+# import torch.optim as optim
+# import torch.nn.functional as F
+
+# from torchviz import make_dot
+# from IPython.display import display
 
 """
-単語位置出力を観点ごとにaverage poolingして観点埋め込みを生成し，
-それと同時にCLSトークンの位置で論文全体埋め込みを取得，
-それぞれをLossに組み込んでFinetuning
+単語位置出力を観点ごとにLSTMで集約して観点埋め込みを生成し，
+Finetuning
 """
 
 
@@ -62,9 +73,7 @@ arg_to_scheduler = {
 arg_to_scheduler_choices = sorted(arg_to_scheduler.keys())
 arg_to_scheduler_metavar = "{" + ", ".join(arg_to_scheduler_choices) + "}"
 
-# ここでLossの占める全体の割合を決める
-entire_loss_rate = 0.3
-
+bertOutputSize = 768
 
 """
 自分で定義するデータセット
@@ -322,21 +331,25 @@ class Specter(pl.LightningModule):
         self.hparams = init_args
 
         # SciBERTを初期値
-        # self.model = AutoModel.from_pretrained("allenai/scibert_scivocab_cased")
-        # self.tokenizer = AutoTokenizer.from_pretrained("allenai/scibert_scivocab_cased")
-
+        self.bert = AutoModel.from_pretrained("allenai/scibert_scivocab_cased")
+        self.tokenizer = AutoTokenizer.from_pretrained("allenai/scibert_scivocab_cased")
+        
         # SPECTERを初期値とする場合
-        self.model = AutoModel.from_pretrained("allenai/specter")
-        self.tokenizer = AutoTokenizer.from_pretrained("allenai/specter")
+        # self.model = AutoModel.from_pretrained("allenai/specter")
+        # self.tokenizer = AutoTokenizer.from_pretrained("allenai/specter")
 
-        self.tokenizer.model_max_length = self.model.config.max_position_embeddings
-        self.hparams.seqlen = self.model.config.max_position_embeddings
+        self.tokenizer.model_max_length = self.bert.config.max_position_embeddings
+        self.hparams.seqlen = self.bert.config.max_position_embeddings
         self.triple_loss = TripletLoss(margin=float(init_args.margin))
         
-        # cosine類似度も試す
-        # self.triple_loss = TripletLoss(
-        #     distance='cosine', margin=float(init_args.margin))
-        
+        # BERTの出力トークンを統合するレイヤー
+        # input_size: 各時刻における入力ベクトルのサイズ、ここではBERTの出力の768次元になる
+        # hidden_size: メモリセルとかゲートの隠れ層の次元、出力のベクトルの次元もこの値になる（Batch_size, sequence_length, hidden_size)
+        #   chatGPTによると一般的には、LSTMの隠れ層の次元は、入力データの次元と同じであることが多い
+        self.lstm = nn.LSTM(input_size=bertOutputSize,
+                            hidden_size=bertOutputSize, batch_first=True)
+
+
         # number of training instances
         self.training_size = None
         # number of testing instances
@@ -345,13 +358,12 @@ class Specter(pl.LightningModule):
         self.test_size = None
         # This is a dictionary to save the embeddings for source papers in test step.
         self.embedding_output = {}
-        self.lossList = []
 
         self.debug = False
 
     def forward(self, input_ids, token_type_ids, attention_mask):
         # in lightning, forward defines the prediction/inference actions
-        source_embedding = self.model(
+        source_embedding = self.bert(
             input_ids=input_ids, token_type_ids=token_type_ids, attention_mask=attention_mask)
         return source_embedding
 
@@ -433,7 +445,7 @@ class Specter(pl.LightningModule):
 
     def configure_optimizers(self):
         """Prepare optimizer and schedule (linear warmup and decay)"""
-        model = self.model
+        model = self.bert
         no_decay = ["bias", "LayerNorm.weight"]
         optimizer_grouped_parameters = [
             {
@@ -464,27 +476,11 @@ class Specter(pl.LightningModule):
         # source_embedding = self.model(**batch[0])[1] # [1]はpooler_outputのこと　https://huggingface.co/docs/transformers/model_doc/bert#transformers.BertModel
         # pos_embedding = self.model(**batch[1])[1]
         # neg_embedding = self.model(**batch[2])[1]
-        source_embedding = self.model(**batch[0]["input"])['last_hidden_state']
-        pos_embedding = self.model(**batch[1]["input"])['last_hidden_state']
-        neg_embedding = self.model(**batch[2]["input"])['last_hidden_state']
+        source_embedding = self.bert(**batch[0]["input"])['last_hidden_state']
+        pos_embedding = self.bert(**batch[1]["input"])['last_hidden_state']
+        neg_embedding = self.bert(**batch[2]["input"])['last_hidden_state']
         # last hidden stateのtensor形状は
         # ( バッチサイズ, 系列長(512), 次元数(768) )
-
-        """
-        全体のロス計算
-        """
-        # [CLS]の位置のlast_hidden_stateを取り出す
-        # tensorの形状は (2, 768)
-        source_cls_embedding = source_embedding[:, 0, :]
-        pos_cls_embedding = pos_embedding[:,0,:]
-        neg_cls_embedding = neg_embedding[:, 0, :]
-        cls_loss = self.triple_loss(
-            source_cls_embedding, pos_cls_embedding, neg_cls_embedding)
-        #
-        # debug print
-        #
-        # print("source_embedding.size(): ", source_embedding.size())
-        # print("source_cls_embedding.size(): ", source_cls_embedding.size())
 
         """
         観点のロス計算
@@ -513,13 +509,12 @@ class Specter(pl.LightningModule):
                 label_loss_calculated_count += 1
         
         """
-        全体と観点のロスを足し合わせ
+        一致する観点がなければlossは0
         """
         if label_loss_calculated_count > 0:
-            loss = entire_loss_rate * cls_loss + \
-                (1 - entire_loss_rate) * (batch_label_loss / label_loss_calculated_count)
+            loss = batch_label_loss / label_loss_calculated_count
         else:
-            loss = cls_loss
+            loss = 0
         
         if self.debug:
             return {"loss": loss}
@@ -531,35 +526,17 @@ class Specter(pl.LightningModule):
         self.log('rate', lr_scheduler.get_last_lr()
                  [-1], on_step=True, on_epoch=False, prog_bar=True, logger=True)
 
-        self.lossList.append(loss.detach().cpu().numpy())
-        # print(self.lossList)
         return {"loss": loss}
 
     def validation_step(self, batch, batch_idx):
         # source_embedding = self.model(**batch[0])[1] # [1]はpooler_outputのこと　https://huggingface.co/docs/transformers/model_doc/bert#transformers.BertModel
         # pos_embedding = self.model(**batch[1])[1]
         # neg_embedding = self.model(**batch[2])[1]
-        source_embedding = self.model(**batch[0]["input"])['last_hidden_state']
-        pos_embedding = self.model(**batch[1]["input"])['last_hidden_state']
-        neg_embedding = self.model(**batch[2]["input"])['last_hidden_state']
+        source_embedding = self.bert(**batch[0]["input"])['last_hidden_state']
+        pos_embedding = self.bert(**batch[1]["input"])['last_hidden_state']
+        neg_embedding = self.bert(**batch[2]["input"])['last_hidden_state']
         # last hidden stateのtensor形状は
         # ( バッチサイズ, 系列長(512), 次元数(768) )
-
-        """
-        全体のロス計算
-        """
-        # [CLS]の位置のlast_hidden_stateを取り出す
-        # tensorの形状は (2, 768)
-        source_cls_embedding = source_embedding[:, 0, :]
-        pos_cls_embedding = pos_embedding[:, 0, :]
-        neg_cls_embedding = neg_embedding[:, 0, :]
-        cls_loss = self.triple_loss(
-            source_cls_embedding, pos_cls_embedding, neg_cls_embedding)
-        #
-        # debug print
-        #
-        # print("source_embedding.size(): ", source_embedding.size())
-        # print("source_cls_embedding.size(): ", source_cls_embedding.size())
 
         """
         観点のロス計算
@@ -581,6 +558,8 @@ class Specter(pl.LightningModule):
                     valid_label_list.append(label)
                     # debug print
                     print("--", label)
+
+                    print(source_label_pooling[b][label])
                     label_loss += self.triple_loss(
                         source_label_pooling[b][label], pos_label_pooling[b][label], neg_label_pooling[b][label])
 
@@ -589,13 +568,12 @@ class Specter(pl.LightningModule):
                 label_loss_calculated_count += 1
 
         """
-        全体と観点のロスを足し合わせ
+        一致する観点がなければlossは0
         """
         if label_loss_calculated_count > 0:
-            loss = entire_loss_rate * cls_loss + \
-                (1 - entire_loss_rate) * (batch_label_loss / label_loss_calculated_count)
+            loss = batch_label_loss / label_loss_calculated_count
         else:
-            loss = cls_loss
+            loss = 0
 
         if self.debug:
             return {"loss": loss}
@@ -631,7 +609,7 @@ class Specter(pl.LightningModule):
             fp.write('\n'.join(json.dumps(i) for i in embedding_output_list))
 
     def test_step(self, batch, batch_nb):
-        source_embedding = self.model(**batch[0])[1]
+        source_embedding = self.bert(**batch[0])[1]
         source_paper_id = batch[1]
 
         batch_embedding_output = dict(zip(source_paper_id, source_embedding))
@@ -639,33 +617,6 @@ class Specter(pl.LightningModule):
         # .update() will automatically remove duplicates.
         self.embedding_output.update(batch_embedding_output)
         # return self.validation_step(batch, batch_nb)
-
-    def label_pooling_o(self, last_hidden_states, position_label_list):
-        label_last_hidden_states = {}
-        label_dict = self.hparams.label_dict
-        for label in label_dict.values():
-            label_last_hidden_states[label] = []
-
-        # 各単語のlast_hidden_stateを観点ごとのリストに格納
-        print("")
-        print(position_label_list)
-        for i, label in enumerate(position_label_list):
-            print(label)
-            label_last_hidden_states[label].append[last_hidden_states[i]]
-
-        # average poolingで集約
-        label_pooling = {}
-        for label in label_dict.values():
-            # ２次元のテンソルに変換
-            if len(label_last_hidden_states[label]) > 0:
-                label_last_hidden_states_tensor = torch.stack(
-                    label_last_hidden_states[label])
-                label_pooling[label] = label_last_hidden_states_tensor.mean(
-                    dim=0)
-            else:
-                label_pooling[label] = None
-
-        return label_pooling
 
     def label_pooling(self, batch_last_hidden_state, batch_position_label_list):
         batch_size = batch_last_hidden_state.size(0)
@@ -709,9 +660,11 @@ class Specter(pl.LightningModule):
                 if len(label_last_hidden_state[label]) > 0:
                     label_last_hidden_state_tensor = torch.stack(
                         label_last_hidden_state[label])
-                    # print(label_last_hidden_state_tensor)
-                    label_pooling[label] = label_last_hidden_state_tensor.mean(
-                        dim=0)
+                    # TODO: 以下のコードが正しく動くか要検証
+                    output, _ = self.lstm(
+                        label_last_hidden_state_tensor, None)
+                    
+                    label_pooling[label] = output[-1]
                 else:
                     label_pooling[label] = None
 
@@ -881,12 +834,16 @@ def main():
             )
 
             extra_train_params = get_train_params(args)
-            wandb_logger = WandbLogger(project="SPECTER-AveragePooling-entire-label",
-                                       tags=["SPECTER", "AveragePooling", "entire-label"])
+            wandb.init(project='SPECTER-LSTM-label')
+            wandb_logger = WandbLogger(project="SPECTER-LSTM-label",
+                                       tags=["SPECTER", "LSTM", "label"])
 
             trainer = pl.Trainer(logger=wandb_logger,
                                  checkpoint_callback=checkpoint_callback,
                                  **extra_train_params)
+
+            # 計算グラフの可視化
+            wandb.watch(model, log='all')
 
             trainer.fit(model)
 

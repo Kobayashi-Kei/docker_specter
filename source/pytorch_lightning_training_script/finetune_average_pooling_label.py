@@ -36,8 +36,7 @@ from pytorch_lightning.loggers import WandbLogger
 
 """
 単語位置出力を観点ごとにaverage poolingして観点埋め込みを生成し，
-それと同時にCLSトークンの位置で論文全体埋め込みを取得，
-それぞれをLossに組み込んでFinetuning
+Finetuning
 """
 
 
@@ -358,23 +357,6 @@ class Specter(pl.LightningModule):
     -> つまりこのメソッドに関わる箇所を書き換えればいい。
     """
     def _get_loader(self, split):
-        # 観点ごとのTripletは使わない
-        # allLabelData = []
-        # for label in self.hparams.labelList:
-        #     path = "/workspace/dataserver/axcell/large/specter/" + \
-        #         self.hparams.method + "/triple-" + \
-        #         label + "-" + split + ".json"
-        #     with open(path, 'r') as f:
-        #         data = json.load(f)
-        #     for i, item in enumerate(data):
-        #         item["label"] = label
-        #         data[i] = item
-        #     allLabelData += data
-
-        #     print("-----data length -----", len(data))
-        #     print(path)
-        #     print(f'label: {label}')
-        #     print(f'len(allLabelData): {len(allLabelData)}')
         path = "/workspace/dataserver/axcell/large/specter/paper/triple-" + split + ".json"
         with open(path, 'r') as f:
             data = json.load(f)
@@ -382,13 +364,6 @@ class Specter(pl.LightningModule):
         path = "/workspace/dataserver/axcell/large/paperDict.json"
         with open(path, 'r') as f:
             paper_dict = json.load(f)
-
-        # path = "/workspace/dataserver/axcell/large/labeledAbst.json"
-        # with open(path, 'r') as f:
-        #     labeled_abst_dict = json.load(f)
-        # # 扱いやすいようにアブストだけでなくタイトルもvalueで参照できるようにしておく
-        # for title in labeled_abst_dict:
-        #     labeled_abst_dict[title]["title"] = title
 
         path = "/workspace/dataserver/axcell/large/result_ssc.json"
         with open(path, 'r') as f:
@@ -522,7 +497,7 @@ class Specter(pl.LightningModule):
         一致する観点がなければlossは0
         """
         if label_loss_calculated_count > 0:
-            loss = label_loss_calculated_count
+            loss = batch_label_loss / label_loss_calculated_count
         else:
             loss = 0
         
@@ -536,8 +511,6 @@ class Specter(pl.LightningModule):
         self.log('rate', lr_scheduler.get_last_lr()
                  [-1], on_step=True, on_epoch=False, prog_bar=True, logger=True)
 
-        self.lossList.append(loss.detach().cpu().numpy())
-        # print(self.lossList)
         return {"loss": loss}
 
     def validation_step(self, batch, batch_idx):
@@ -581,12 +554,9 @@ class Specter(pl.LightningModule):
         一致する観点がなければlossは0
         """
         if label_loss_calculated_count > 0:
-            loss = label_loss_calculated_count
+            loss = batch_label_loss / label_loss_calculated_count
         else:
             loss = 0
-
-        if self.debug:
-            return {"loss": loss}
 
         self.log('val_loss', loss, on_step=True, on_epoch=False, prog_bar=True)
         return {'val_loss': loss}
@@ -627,33 +597,6 @@ class Specter(pl.LightningModule):
         # .update() will automatically remove duplicates.
         self.embedding_output.update(batch_embedding_output)
         # return self.validation_step(batch, batch_nb)
-
-    def label_pooling_o(self, last_hidden_states, position_label_list):
-        label_last_hidden_states = {}
-        label_dict = self.hparams.label_dict
-        for label in label_dict.values():
-            label_last_hidden_states[label] = []
-
-        # 各単語のlast_hidden_stateを観点ごとのリストに格納
-        print("")
-        print(position_label_list)
-        for i, label in enumerate(position_label_list):
-            print(label)
-            label_last_hidden_states[label].append[last_hidden_states[i]]
-
-        # average poolingで集約
-        label_pooling = {}
-        for label in label_dict.values():
-            # ２次元のテンソルに変換
-            if len(label_last_hidden_states[label]) > 0:
-                label_last_hidden_states_tensor = torch.stack(
-                    label_last_hidden_states[label])
-                label_pooling[label] = label_last_hidden_states_tensor.mean(
-                    dim=0)
-            else:
-                label_pooling[label] = None
-
-        return label_pooling
 
     def label_pooling(self, batch_last_hidden_state, batch_position_label_list):
         batch_size = batch_last_hidden_state.size(0)
@@ -869,63 +812,14 @@ def main():
             )
 
             extra_train_params = get_train_params(args)
-            # trainer = pl.Trainer(logger=logger,
-            #                      checkpoint_callback=checkpoint_callback,
-            #                      **extra_train_params)
-            wandb_logger = WandbLogger(project="SPECTER-AveragePooling-entire-label",
-                                       tags=["SPECTER", "AveragePooling", "entire-label"])
+            wandb_logger = WandbLogger(project="SPECTER-AveragePooling-label",
+                                       tags=["SPECTER", "AveragePooling", "label"])
 
             trainer = pl.Trainer(logger=wandb_logger,
                                  checkpoint_callback=checkpoint_callback,
                                  **extra_train_params)
 
             trainer.fit(model)
-
-            # """
-            # ロスの可視化
-            # """
-            # allLabelData = []
-            # for label in label_dict:
-            #     dataPath = "/workspace/dataserver/axcell/large/specter/" + \
-            #         args.method + "/triple-" + \
-            #         label + "-train.json"
-            #     with open(dataPath, 'r') as f:
-            #         data = json.load(f)
-            #     allLabelData += data
-
-            # fig = plt.figure()
-            # x = list(range(1, len(model.lossList) + 1))
-            # for i in range(1, args.num_epochs):
-            #     # trainningデータの長さをバッチサイズで割り、1を足す
-            #     vlineValue = (int(len(allLabelData)/args.batch_size)+1)*i
-            #     # print(vlineValue)
-            #     plt.vlines(x=vlineValue, ymin=0, ymax=2, colors="gray",
-            #                linestyles="dashed", label="epoch"+str(i))
-            # plt.legend()
-
-            # # ロスの線が潰れないように束でとって平均化する
-            # batch = 100
-            # pltLossList = []
-            # pltX = []
-            # for i in range(int(len(model.lossList)/batch)+1):
-            #     if i*batch+batch < len(model.lossList):
-            #         pltLossList.append(
-            #             np.mean(model.lossList[i*batch:i*batch+batch]))
-            #         print(i*batch, i*batch+batch)
-            #     else:
-            #         pltLossList.append(np.mean(model.lossList[i*batch:]))
-            #         print(i*batch)
-            #     pltX.append(i*batch)
-            # plt.plot(pltX, pltLossList)
-
-            # imgDirPath = dirPath + "image/"
-            # imgPath = imgDirPath + "loss.png"
-            # if not os.path.exists(imgDirPath):
-            #     os.mkdir(imgDirPath)
-            # fig.savefig(imgPath)
-
-            # with open(dirPath + "args.json", "w") as f:
-            #     json.dump(vars(args), f, indent=4)
 
             line_notify("172.21.64.47:" + os.path.basename(__file__) + "が終了")
 
