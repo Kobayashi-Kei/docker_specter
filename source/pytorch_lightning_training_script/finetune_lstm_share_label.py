@@ -660,7 +660,9 @@ class Specter(pl.LightningModule):
                 if len(label_last_hidden_state[label]) > 0:
                     label_last_hidden_state_tensor = torch.stack(
                         label_last_hidden_state[label])
-                    # TODO: 以下のコードが正しく動くか要検証
+                    # outputに各単語に対応する隠れ層の出力（単語数×次元数のtensor）, _ に最後の単語に対応する隠れ層の出力とCtのタプル
+                    # つまり，outputの最後の要素を予測に利用する
+                    # 参考: https://qiita.com/m__k/items/841950a57a0d7ff05506#%E3%83%A2%E3%83%87%E3%83%AB%E5%AE%9A%E7%BE%A9
                     output, _ = self.lstm(
                         label_last_hidden_state_tensor, None)
                     
