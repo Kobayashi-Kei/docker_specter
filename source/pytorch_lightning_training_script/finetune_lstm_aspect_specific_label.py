@@ -852,9 +852,7 @@ def main():
             trainer = pl.Trainer(logger=wandb_logger,
                                  checkpoint_callback=checkpoint_callback,
                                  **extra_train_params)
-
-            # 計算グラフの可視化
-            wandb.watch(model, log='all')
+            
 
             trainer.fit(model)
 

@@ -44,6 +44,9 @@ import itertools
 import logging
 logger = logging.getLogger(__name__)
 
+# wandb
+from pytorch_lightning.loggers import WandbLogger
+
 
 """
 SPECTERの学習データを用いてSciBERTの初期値から学習を行う
@@ -346,14 +349,15 @@ class Specter(pl.LightningModule):
             init_args = Namespace(**init_args)
         checkpoint_path = init_args.checkpoint_path
         logger.info(f'loading model from checkpoint: {checkpoint_path}')
+        self.save_hyperparameters()
 
         self.hparams = init_args
-        self.model = AutoModel.from_pretrained(
+        self.bert = AutoModel.from_pretrained(
             "allenai/scibert_scivocab_cased")
         self.tokenizer = AutoTokenizer.from_pretrained(
             "allenai/scibert_scivocab_cased")
-        self.tokenizer.model_max_length = self.model.config.max_position_embeddings
-        self.hparams.seqlen = self.model.config.max_position_embeddings
+        self.tokenizer.model_max_length = self.bert.config.max_position_embeddings
+        self.hparams.seqlen = self.bert.config.max_position_embeddings
 
         self.triple_loss = TripletLoss(margin=float(init_args.margin))
         # number of training instances
@@ -365,11 +369,9 @@ class Specter(pl.LightningModule):
         # This is a dictionary to save the embeddings for source papers in test step.
         self.embedding_output = {}
 
-        self.lossList = []
-
     def forward(self, input_ids, token_type_ids, attention_mask):
         # in lightning, forward defines the prediction/inference actions
-        source_embedding = self.model(
+        source_embedding = self.bert(
             input_ids=input_ids, token_type_ids=token_type_ids, attention_mask=attention_mask)
 
         # max_poolingを取って、765×単語数の行列を765×1に変換する　(参考 https://www.ai-shift.co.jp/techblog/2145)
@@ -462,7 +464,7 @@ class Specter(pl.LightningModule):
 
     def configure_optimizers(self):
         """Prepare optimizer and schedule (linear warmup and decay)"""
-        model = self.model
+        model = self.bert
         no_decay = ["bias", "LayerNorm.weight"]
         optimizer_grouped_parameters = [
             {
@@ -490,9 +492,9 @@ class Specter(pl.LightningModule):
         return [optimizer], [scheduler]
 
     def training_step(self, batch, batch_idx):
-        source_embedding = self.model(**batch[0])[1]
-        pos_embedding = self.model(**batch[1])[1]
-        neg_embedding = self.model(**batch[2])[1]
+        source_embedding = self.forward(**batch[0])
+        pos_embedding = self.forward(**batch[1])
+        neg_embedding = self.forward(**batch[2])
 
         loss = self.triple_loss(source_embedding, pos_embedding, neg_embedding)
 
@@ -503,14 +505,13 @@ class Specter(pl.LightningModule):
         self.log('rate', lr_scheduler.get_last_lr()
                  [-1], on_step=True, on_epoch=False, prog_bar=True, logger=True)
 
-        self.lossList.append(loss.detach().cpu().numpy())
-
         return {"loss": loss}
 
     def validation_step(self, batch, batch_idx):
-        source_embedding = self.model(**batch[0])[1]
-        pos_embedding = self.model(**batch[1])[1]
-        neg_embedding = self.model(**batch[2])[1]
+        source_embedding = self.forward(**batch[0])
+        pos_embedding = self.forward(**batch[1])
+        neg_embedding = self.forward(**batch[2])
+
 
         loss = self.triple_loss(source_embedding, pos_embedding, neg_embedding)
         self.log('val_loss', loss, on_step=True, on_epoch=False, prog_bar=True)
@@ -544,7 +545,7 @@ class Specter(pl.LightningModule):
             fp.write('\n'.join(json.dumps(i) for i in embedding_output_list))
 
     def test_step(self, batch, batch_nb):
-        source_embedding = self.model(**batch[0])[1]
+        source_embedding = self.bert(**batch[0])[1]
         source_paper_id = batch[1]
 
         batch_embedding_output = dict(zip(source_paper_id, source_embedding))
@@ -706,60 +707,20 @@ def main():
 
             extra_train_params = get_train_params(args)
 
-            trainer = pl.Trainer(logger=logger,
+            wandb_logger = WandbLogger(project="Pretrain-MaxPooling",
+                                       tags=["Pretrain", "Max Pooling", "SciBERT"])
+
+            trainer = pl.Trainer(logger=wandb_logger,
                                  checkpoint_callback=checkpoint_callback,
                                  **extra_train_params)
 
             trainer.fit(model)
-            """
-            ロスの可視化
-            """
-            # dirPath = f'/workspace/dataserver/model_outputs/specter/{args.method}_{logger.version}/'
-            # dataPath = "/workspace/dataserver/axcell/large/specter/" + \
-            #     args.method + "/triple-" + \
-            #     args.label + "-train.json"
-            # with open(dataPath, 'r') as f:
-            #     data = json.load(f)
 
-            # fig = plt.figure()
-            # x = list(range(1, len(model.lossList) + 1))
-            # for i in range(1, args.num_epochs):
-            #     # trainningデータの長さをバッチサイズで割り、1を足す
-            #     vlineValue = (int(len(data)/args.batch_size)+1)*i
-            #     # print(vlineValue)
-            #     plt.vlines(x=vlineValue, ymin=0, ymax=2, colors="gray",
-            #                linestyles="dashed", label="epoch"+str(i))
-            # plt.legend()
-
-            # # ロスの線が潰れないように束でとって平均化する
-            # batch = 100
-            # pltLossList = []
-            # pltX = []
-            # for i in range(int(len(model.lossList)/batch)+1):
-            #     if i*batch+batch < len(model.lossList):
-            #         pltLossList.append(
-            #             np.mean(model.lossList[i*batch:i*batch+batch]))
-            #         print(i*batch, i*batch+batch)
-            #     else:
-            #         pltLossList.append(np.mean(model.lossList[i*batch:]))
-            #         print(i*batch)
-            #     pltX.append(i*batch)
-            # plt.plot(pltX, pltLossList)
-
-            # imgDirPath = dirPath + "image/"
-            # imgPath = imgDirPath + "loss-" + args.label + ".png"
-            # if not os.path.exists(imgDirPath):
-            #     os.mkdir(imgDirPath)
-            # fig.savefig(imgPath)
-
-            # with open(dirPath + "args.json", "w") as f:
-            #     json.dump(vars(args), f, indent=4)
-
-            line_notify("172.21.:" + os.path.basename(__file__) + "が終了")
+            line_notify("172.21.64.47:" + os.path.basename(__file__) + "が終了")
 
     except Exception as e:
         print(traceback.format_exc())
-        message = "172.21.: Error: " + \
+        message = "172.21.65.47: Error: " + \
             os.path.basename(__file__) + " " + str(traceback.format_exc())
         line_notify(message)
 
