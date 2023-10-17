@@ -360,6 +360,10 @@ class Specter(pl.LightningModule):
         self.tokenizer.model_max_length = self.bert.config.max_position_embeddings
         self.hparams.seqlen = self.bert.config.max_position_embeddings
 
+        # BERTのパラメータを固定する
+        for param in self.bert.parameters():
+            param.requires_grad = False
+
         # BERTの出力トークンを統合するレイヤー
         # input_size: 各時刻における入力ベクトルのサイズ、ここではBERTの出力の768次元になる
         # hidden_size: メモリセルとかゲートの隠れ層の次元、出力のベクトルの次元もこの値になる（Batch_size, sequence_length, hidden_size)
@@ -449,15 +453,14 @@ class Specter(pl.LightningModule):
 
     def configure_optimizers(self):
         """Prepare optimizer and schedule (linear warmup and decay)"""
-        model = self.bert
         no_decay = ["bias", "LayerNorm.weight"]
         optimizer_grouped_parameters = [
             {
-                "params": [p for n, p in model.named_parameters() if not any(nd in n for nd in no_decay)],
+                "params": [p for n, p in self.lstm.named_parameters() if not any(nd in n for nd in no_decay)],
                 "weight_decay": self.hparams.weight_decay,
             },
             {
-                "params": [p for n, p in model.named_parameters() if any(nd in n for nd in no_decay)],
+                "params": [p for n, p in self.lstm.named_parameters() if any(nd in n for nd in no_decay)],
                 "weight_decay": 0.0,
             },
         ]

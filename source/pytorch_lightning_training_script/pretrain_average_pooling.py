@@ -374,8 +374,14 @@ class Specter(pl.LightningModule):
         # in lightning, forward defines the prediction/inference actions
         source_embedding = self.bert(
             input_ids=input_ids, token_type_ids=token_type_ids, attention_mask=attention_mask)
-
         sequence_output = source_embedding['last_hidden_state'].mean(dim=1)
+
+        # meanはdim=1でOK，(バッチ, 系列長, 768)だから.　バッチが無い時はdim=0となるsss
+        # print("debug")
+        # print(source_embedding['last_hidden_state'].size())
+        # print(sequence_output.size())
+        # >> torch.Size([2, 512, 768])
+        # >> torch.Size([2, 768])
 
         return sequence_output
 
