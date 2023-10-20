@@ -24,9 +24,8 @@ SPECTER + LSTM を用いて、BERTの最終層の全ての出力を用いて
 
 def main():
     # 以下をモデルに合わせて変更する
-    # modelType = "lstm"
-    # modelParamPath = f"../dataserver/model_outputs/specter/20230503/version_lstm/checkpoints/"
-    modelParamPath = f"../dataserver/model_outputs/specter/20230503/version_lstm/checkpoints/ep-epoch=1_avg_val_loss-avg_val_loss=0.507.ckpt"
+    modelType = "pretrain_lstm_2023_10_16"
+    modelParamPath = f"../dataserver/model_outputs/specter/pretrain_lstm_2023_10_16/checkpoints/*"
 
     # Axcellのデータサイズ(基本medium)
     size = "medium"
@@ -185,7 +184,7 @@ def main():
             # exit()
             # 各トークンをBERTに通す
             input = input.to('cuda:0')
-            output = model.model(**input)[0][0]
+            output = model.bert(**input)[0][0]
 
             # print(output)
             # print(output.size())

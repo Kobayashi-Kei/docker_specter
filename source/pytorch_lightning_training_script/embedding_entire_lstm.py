@@ -23,8 +23,8 @@ SPECTER + LSTM を用いて、BERTの最終層の全ての出力を用いて
 
 def main():
     # 以下をモデルに合わせて変更する
-    modelType = "lstm"
-    modelParamPath = f"save/lstm-47/checkpoints/*"
+    modelType = "pretrain_lstm_entire"
+    modelParamPath = f"../dataserver/model_outputs/specter/pretrain_lstm/checkpoints" + "/*"
 
     # Axcellのデータサイズ(基本medium)
     size = "medium"
@@ -89,23 +89,17 @@ def main():
 
             # 各トークンをBERTに通す
             input = input.to('cuda:0')
-            output = model.model(**input)[0][0]
+            output = model.bert(**input)
+            # print(output['last_hidden_state'].size())
+            # >> torch.Size([1, 154, 768])
 
-            # print(output)
-            # print(output.size())
-            # exit()
-
-            out, _ = model.lstm(output.unsqueeze(0), None)
-            # print(out)
+            out, _ = model.lstm(output['last_hidden_state'], None)
             # print(out.size())
-            # exit()
-
-            # print(out[:, -1, :])
+            # >> torch.Size([1, 154, 768])
             # print(out[:, -1, :].size())
-            # print(out[:, -1, :].tolist()[0])
-            # exit()
+            # >> torch.Size([1, 768])
 
-            outputTitleAbstEmbedding[title] = out[:, -1, :].tolist()[0]
+            outputTitleAbstEmbedding[title] = out[:, -1, :][0].tolist()
 
         # ファイル出力
         # labeledAbstSpecter.jsonの名称は評価プログラムでも使っているため変更しない

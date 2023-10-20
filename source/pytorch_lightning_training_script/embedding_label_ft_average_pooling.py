@@ -26,8 +26,8 @@ def main():
     # 以下をモデルに合わせて変更する
     # modelType = "average_pooling"
     # modelParamPath = f"../dataserver/model_outputs/specter/20230503/version_average_pooling/checkpoints/*"
-    modelType = "scibert_average_pooling"
-    modelParamPath = f"../dataserver/model_outputs/specter/scibert_average_pooling/checkpoints/"
+    modelType = "specter_average_pooling"
+    modelParamPath = f"../dataserver/model_outputs/specter/paper_specter_average_pooling/checkpoints" + "/*" 
 
     # Axcellのデータサイズ(基本medium)
     size = "medium"
@@ -186,7 +186,7 @@ def main():
             # exit()
             # 各トークンをBERTに通す
             input = input.to('cuda:0')
-            output = model.model(**input)[0][0]
+            output = model.forward(**input)[0][0]
 
             # debug
             # output = model.model(**input)['last_hidden_state']
