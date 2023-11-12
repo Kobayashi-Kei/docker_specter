@@ -331,12 +331,12 @@ class Specter(pl.LightningModule):
         self.hparams = init_args
 
         # SciBERTを初期値
-        self.bert = AutoModel.from_pretrained("allenai/scibert_scivocab_cased")
-        self.tokenizer = AutoTokenizer.from_pretrained("allenai/scibert_scivocab_cased")
+        # self.bert = AutoModel.from_pretrained("allenai/scibert_scivocab_cased")
+        # self.tokenizer = AutoTokenizer.from_pretrained("allenai/scibert_scivocab_cased")
         
         # SPECTERを初期値とする場合
-        # self.model = AutoModel.from_pretrained("allenai/specter")
-        # self.tokenizer = AutoTokenizer.from_pretrained("allenai/specter")
+        self.bert = AutoModel.from_pretrained("allenai/specter")
+        self.tokenizer = AutoTokenizer.from_pretrained("allenai/specter")
 
         self.tokenizer.model_max_length = self.bert.config.max_position_embeddings
         self.hparams.seqlen = self.bert.config.max_position_embeddings
@@ -445,15 +445,19 @@ class Specter(pl.LightningModule):
 
     def configure_optimizers(self):
         """Prepare optimizer and schedule (linear warmup and decay)"""
-        model = self.bert
         no_decay = ["bias", "LayerNorm.weight"]
+
+        # Combine parameters of BERT and LSTM
+        model_parameters = list(self.bert.named_parameters()) + \
+            list(self.lstm.named_parameters())
+        
         optimizer_grouped_parameters = [
             {
-                "params": [p for n, p in model.named_parameters() if not any(nd in n for nd in no_decay)],
+                "params": [p for n, p in model_parameters if not any(nd in n for nd in no_decay)],
                 "weight_decay": self.hparams.weight_decay,
             },
             {
-                "params": [p for n, p in model.named_parameters() if any(nd in n for nd in no_decay)],
+                "params": [p for n, p in model_parameters if any(nd in n for nd in no_decay)],
                 "weight_decay": 0.0,
             },
         ]
@@ -837,7 +841,7 @@ def main():
 
             extra_train_params = get_train_params(args)
             wandb.init(project='SPECTER-LSTM-label')
-            wandb_logger = WandbLogger(project="SPECTER-LSTM-label",
+            wandb_logger = WandbLogger(project="SPECTER-LSTM-share-label",
                                        tags=["SPECTER", "LSTM", "label"])
 
             trainer = pl.Trainer(logger=wandb_logger,
