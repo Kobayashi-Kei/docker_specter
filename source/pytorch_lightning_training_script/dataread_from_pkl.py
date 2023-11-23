@@ -37,7 +37,8 @@ def main():
     reader = DataReaderFromPickled()
 
     # pklファイルのパス
-    file_path = "/workspace/dataserver/specterData/train.pkl"
+    # file_path = "/workspace/dataserver/specterData/train.pkl"
+    file_path = "/workspace/dataserver/specterData/val.pkl"
 
 
     # データを逐次読み込む
@@ -69,7 +70,7 @@ def main():
         source_title, source_abst = detokenize_and_split(source_input)
         triple['source'] = source_title
         if not source_title in paperDict:
-            paperDatum = {'title' : source_title, 'abstract': sent_tokenize(source_abst, language='english')}
+            paperDatum = {'title' : source_title, 'abstract': source_abst}
             paperDict[source_title] = paperDatum
             if len(sent_tokenize(source_abst, language='english')) > 0:
                 datal = {'abstract_id': 0, 'sentences': sent_tokenize(source_abst, language='english')}
@@ -81,7 +82,7 @@ def main():
         pos_title, pos_abst = detokenize_and_split(pos_input)
         triple['pos'] = pos_title
         if not pos_title in paperDict:
-            paperDatum = {'title' : pos_title, 'abstract': sent_tokenize(pos_abst, language='english')}
+            paperDatum = {'title' : pos_title, 'abstract': pos_abst}
             paperDict[pos_title] = paperDatum
             if len(sent_tokenize(pos_abst, language='english')) > 0:
                 datal = {'abstract_id': 0, 'sentences': sent_tokenize(pos_abst, language='english')}
@@ -92,7 +93,7 @@ def main():
         neg_title, neg_abst = detokenize_and_split(neg_input)
         triple['neg'] = neg_title
         if not neg_title in paperDict:
-            paperDatum = {'title' : neg_title, 'abstract': sent_tokenize(neg_abst, language='english')}
+            paperDatum = {'title' : neg_title, 'abstract': neg_abst}
             paperDict[neg_title] = paperDatum
             if len(sent_tokenize(neg_abst, language='english')) > 0:
                 datal = {'abstract_id': 0, 'sentences': sent_tokenize(neg_abst, language='english')}
@@ -103,7 +104,7 @@ def main():
 
         # print(len(triples))
     
-    triplePath = './specter_triple-train.json'
+    triplePath = './specter_triple-val.json'
     paperDictPath = './specter_paperDict.json'
     sscInputLineToTitlePath = './specter_ssc_input_line_to_title.json'
     sscInputPath = './specter_ssc_input.jsonl'
