@@ -1,6 +1,6 @@
 # transformers, pytorch
 from transformers import AutoTokenizer, AutoModel
-
+from torch.utils.data import DataLoader
 import torch
 
 # basic python packages
@@ -8,6 +8,7 @@ import random
 import numpy as np
 import os
 import traceback
+import json
 
 # inc
 from inc.util import save_checkpoint,  calculate_gradient_norm
@@ -18,19 +19,60 @@ from inc.const import label_dict, num_label_dict
 from inc.const import arg_to_scheduler, arg_to_scheduler_choices, arg_to_scheduler_metavar
 from inc.util import train, validate, embedding
 from inc.const import tokenizer_name
+from inc.MyDataset import PredSscDataset
 
 
 # wandb
 import wandb
+
+
 """
-自分で定義するデータセット
+単語位置出力を観点ごとにaverage poolingして観点埋め込みを生成し，
+Finetuning
 """
+
 class Specter(SpecterOrigin):
     def __init__(self, init_args={}):
         super().__init__(init_args)
-        del self.attn_pooling
-        self.lstm = torch.nn.LSTM(input_size=self.bert.config.hidden_size,
-                            hidden_size=self.bert.config.hidden_size, batch_first=True)
+
+    def _get_loader(self, split, data_name='axcell'):
+        # Axcell データ
+        if data_name == 'axcell':
+            path = "/workspace/dataserver/axcell/large/specter/paper/triple-" + split + ".json"
+            with open(path, 'r') as f:
+                data = json.load(f)
+
+            path = "/workspace/dataserver/axcell/large/paperDict.json"
+            with open(path, 'r') as f:
+                paper_dict = json.load(f)
+
+            path = "/workspace/dataserver/axcell/large/ssc_result_label_preds.json"
+            with open(path, 'r') as f:
+                ssc_result_dict = json.load(f)
+
+        # SPECTER データ
+        elif data_name == 'specter':
+            path = "/workspace/dataserver/specterData/label/" + split + "/specter_triple-" + split + ".json"
+            with open(path, 'r') as f:
+                data = json.load(f)
+
+            path = "/workspace/dataserver/specterData/label/" + split + "/specter_paperDict.json"
+            with open(path, 'r') as f:
+                paper_dict = json.load(f)
+
+            path = "/workspace/dataserver/specterData/label/" + split + "/result_ssc.json"
+            with open(path, 'r') as f:
+                ssc_result_dict = json.load(f)
+
+        dataset = PredSscDataset(data, paper_dict, ssc_result_dict,
+                        label_dict, self.tokenizer)
+
+        # pin_memory enables faster data transfer to CUDA-enabled GPU.
+        loader = DataLoader(dataset, batch_size=self.hparams.batch_size, num_workers=self.hparams.num_workers,
+                            shuffle=False, pin_memory=False)
+
+        # print(loader)
+        return loader
 
     def calc_label_total_loss(self, source_label_pooling, pos_label_pooling, neg_label_pooling):
         batch_label_loss = 0
@@ -45,10 +87,15 @@ class Specter(SpecterOrigin):
                     # print("--", label)
                     label_loss += self.triple_loss(
                         source_label_pooling[b][label], pos_label_pooling[b][label], neg_label_pooling[b][label])
+                    # label_loss += torch.tanh(self.triple_loss(
+                    #     source_label_pooling[b][label], pos_label_pooling[b][label], neg_label_pooling[b][label]))
+                    # print(torch.tanh(self.triple_loss(
+                    #     source_label_pooling[b][label], pos_label_pooling[b][label], neg_label_pooling[b][label])))
 
             if len(valid_label_list) > 0:
                 batch_label_loss += label_loss/len(valid_label_list)
                 label_loss_calculated_count += 1
+            
 
         """
         一致する観点がなければlossは0
@@ -60,71 +107,7 @@ class Specter(SpecterOrigin):
 
         return loss
 
-    def label_pooling(self, batch_last_hidden_state, batch_position_label_list):
-        batch_size = batch_last_hidden_state.size(0)
-        label_dict = self.hparams.label_dict
-        num_label_dict = self.hparams.num_label_dict
-        batch_label_pooling = []
-        # print()
-        # print("--batch_last_hidden_state--")
-        # print(batch_last_hidden_state)
-        # print("--batch_position_label_list--")
-        # print(batch_position_label_list)
 
-        for b in range(batch_size):
-            label_pooling = {}
-            last_hidden_state = batch_last_hidden_state[b]
-            position_label_list = batch_position_label_list[b]
-            # print(position_label_list)
-            label_last_hidden_state = {}
-            for label in label_dict:
-                label_last_hidden_state[label] = []
-
-            # 各単語のlast_hidden_stateを観点ごとのリストに格納
-            # print("\n", batch_position_label_list[b])
-            for i, label_tensor in enumerate(position_label_list):
-                label_number = str(label_tensor.item()) # tensor -> str
-                # [CLS]と[SEP]の位置はskip
-                if label_number == "-1":
-                    continue
-                # 文末以降は'0'埋めだから終わる
-                if label_number == '0':
-                    break
-                # ex. "1" -> "bg"
-                label = num_label_dict[label_number]
-                # print(label)
-                label_last_hidden_state[label].append(
-                    last_hidden_state[i])
-
-            # average poolingで集約
-            for label in label_last_hidden_state:
-                # ２次元のテンソルに変換
-                if len(label_last_hidden_state[label]) > 0:
-                    label_last_hidden_state_tensor = torch.stack(
-                        label_last_hidden_state[label])
-                    # outputに各単語に対応する隠れ層の出力（単語数×次元数のtensor）, _ に最後の単語に対応する隠れ層の出力とCtのタプル
-                    # つまり，outputの最後の要素を予測に利用する
-                    # 参考: https://qiita.com/m__k/items/841950a57a0d7ff05506#%E3%83%A2%E3%83%87%E3%83%AB%E5%AE%9A%E7%BE%A9
-                    output, _ = self.lstm(
-                        label_last_hidden_state_tensor, None)
-                    
-                    label_pooling[label] = output[-1]
-                else:
-                    label_pooling[label] = None
-
-            batch_label_pooling.append(label_pooling)
-
-        # print(batch_label_pooling)
-        # print(len(batch_label_pooling))
-        # print(len(batch_label_pooling[0]))
-        # for batch in range(len(batch_label_pooling)):
-        #     for label in label_dict:
-        #         print(label)
-        #         print(batch_label_pooling[batch][label])
-        #         if label == "obj":
-        #             exit()
-        return batch_label_pooling
-    
 def main():
     try:
         # 引数の取得，設定
@@ -146,8 +129,6 @@ def main():
             args.total_gpus = args.gpus
 
         save_dir = f'/workspace/dataserver/model_outputs/specter/{args.version}/'
-
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         # wandbの初期化
         wandb.init(project=args.version, config=args)

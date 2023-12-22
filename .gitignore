@@ -182,3 +182,4 @@ save
 pretrain_conv.py
 
 wandb/
+.env

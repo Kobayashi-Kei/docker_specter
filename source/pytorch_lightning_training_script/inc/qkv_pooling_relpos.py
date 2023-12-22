@@ -28,7 +28,7 @@ def make_pad_mask(lengths: torch.Tensor, max_len: int = 0) -> torch.Tensor:
     n = lengths.size(0)
     seq_range = torch.arange(0, max_len, device=lengths.device)
     expaned_lengths = seq_range.unsqueeze(0).expand(n, max_len)
-
+    # 各シーケンスの実際の長さより大きいインデックス位置をTrue（パディングされるべき位置）とし、それ以外をFalseとして、2次元のブールテンソルを返します。
     return expaned_lengths >= lengths.unsqueeze(-1)
 
 class RelPositionalEncoding(torch.nn.Module):
@@ -51,7 +51,6 @@ class RelPositionalEncoding(torch.nn.Module):
         dropout_rate: float,
         num_heads: int = 8,
         max_len: int = 5000,
-        batch_first = False,
     ) -> None:
         """Construct a PositionalEncoding object."""
         super(RelPositionalEncoding, self).__init__()
@@ -59,13 +58,12 @@ class RelPositionalEncoding(torch.nn.Module):
         self.dropout = torch.nn.Dropout(dropout_rate)
         self.pe = None
         self.num_heads = num_heads
-        if batch_first:
-            self.T_of_x = 1
-            self.extend_pe(torch.tensor(0.0).expand(1, max_len))
-        else:
-            self.T_of_x = 0
-            self.extend_pe(torch.tensor(0.0).expand(max_len))
-        
+        # if batch_first:
+        self.T_of_x = 2
+        self.extend_pe(torch.tensor(0.0).expand(1, 1, max_len))
+        # else:
+        #     self.T_of_x = 1
+        #     self.extend_pe(torch.tensor(0.0).expand(1, max_len))
 
 
     def extend_pe(self, x: Tensor) -> None:
@@ -153,7 +151,7 @@ class AttnPhi(nn.Module):
         # Afterthought: Might want to test if xavier initialisation improves performance. 
         # nn.init.xavier_uniform_(self.query)
         
-        self.pos = RelPositionalEncoding(d_model, dropout, num_heads, batch_first=True)
+        self.pos = RelPositionalEncoding(d_model, dropout, num_heads)#, batch_first=True)
         
     def _get_pos(self, src : Tensor):
         B, h, S, C = src.shape
@@ -199,12 +197,12 @@ class AttnPhi(nn.Module):
 
 
 def test():
-    B = 4
-    S = 10
-    C = 32
+    B = 1
+    S = 50
+    C = 768
     
     src = torch.randn(B, S, C)
-    lengths = torch.tensor([3, 6, 7, 10])
+    lengths = torch.tensor([S])
     src_key_padding_mask = make_pad_mask(lengths)
     
     pooler = AttnPhi(d_model=C)
