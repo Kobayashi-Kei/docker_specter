@@ -24,6 +24,7 @@ from inc.const import arg_to_scheduler, arg_to_scheduler_choices, arg_to_schedul
 from inc.util import train, validate, embedding
 from inc.const import tokenizer_name
 from inc.qkv_pooling import AttnPhi, make_pad_mask
+from inc.SpecterAttnAspect import SpecterAttnAspect
 
 # wandb
 import wandb
@@ -34,7 +35,7 @@ import wandb
 Finetuning
 """
 
-class SpecterAttnAspect(SpecterOrigin):
+class Specter(SpecterAttnAspect):
     def calc_label_total_loss(self, source_label_pooling, pos_label_pooling, neg_label_pooling):
         batch_label_loss = 0
         label_loss_calculated_count = 0
@@ -167,12 +168,11 @@ def main():
         train_loader = model._get_loader("train", args.data_name)
         val_loader = model._get_loader("dev", args.data_name)
 
-        # val_loss = validate(model, val_loader, device)
+        # val_loss = validate(model, val_loader, args.device)
         # print(f"Init, Val Loss: {val_loss}")
         for epoch in range(args.num_epochs):
-            # train(model, train_loader, optimizer, scheduler, device, epoch, embedding)
-            train_this(model, train_loader, optimizer, scheduler, device, epoch, embedding)
-            val_loss = validate(model, val_loader, device)
+            train(model, train_loader, optimizer, scheduler, args.device, epoch, embedding)
+            val_loss = validate(model, val_loader, args.device)
             print(f"Epoch {epoch}, Val Loss: {val_loss}")
             save_checkpoint(model, optimizer,save_dir, f"ep-epoch={epoch}.pth.tar")
         
