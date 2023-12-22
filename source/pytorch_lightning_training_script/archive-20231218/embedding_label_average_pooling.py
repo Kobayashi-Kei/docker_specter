@@ -10,11 +10,11 @@ import glob
 import torch
 
 # transformers
-from transformers import AutoTokenizer
+from transformers import AutoTokenizer, AutoModel
 
 # my module
 import lineNotifier
-from finetune_average_pooling_label import Specter
+from pretrain_average_pooling import Specter
 
 """
 SPECTER + Average Pooling を用いて、BERTの最終層の全ての出力を用いて
@@ -26,8 +26,8 @@ def main():
     # 以下をモデルに合わせて変更する
     # modelType = "average_pooling"
     # modelParamPath = f"../dataserver/model_outputs/specter/20230503/version_average_pooling/checkpoints/*"
-    modelType = "specter_average_pooling"
-    modelParamPath = f"../dataserver/model_outputs/specter/paper_specter_average_pooling/checkpoints" + "/*" 
+    modelType = "finetune_label-average_pooling-scibert"
+    modelParamPath = f"../dataserver/model_outputs/specter/finetune_label-average_pooling-scibert/checkpoints" + "/*"
 
     # Axcellのデータサイズ(基本medium)
     size = "medium"
@@ -120,6 +120,14 @@ def main():
         # モデルの初期化
         tokenizer = AutoTokenizer.from_pretrained('allenai/specter')
         model = Specter.load_from_checkpoint(modelCheckpoint)
+        # SPECTERそのまま
+        # model = AutoModel.from_pretrained("allenai/specter")
+        # SPECTERそのまま
+        # model = AutoModel.from_pretrained("allenai/specter")
+        # SPECTERそのまま
+        # model = AutoModel.from_pretrained("allenai/specter")
+        # SPECTERそのまま
+        # model = AutoModel.from_pretrained("allenai/specter")
         # print(model.lstm)
         # exit()
         # model.cuda(1)
@@ -186,7 +194,7 @@ def main():
             # exit()
             # 各トークンをBERTに通す
             input = input.to('cuda:0')
-            output = model.forward(**input)[0][0]
+            output = model.bert(**input)[0][0]
 
             # debug
             # output = model.model(**input)['last_hidden_state']
@@ -224,7 +232,14 @@ def main():
                 #     label_last_hideen_state[label]).unsqueeze(0).to('cuda:0')
                 poolingInput = torch.tensor(
                     label_last_hideen_state[label]).to('cuda:0')
+                # [n, 768]の場合はmean()の次元はdim=0 でOK
+                # >> > a
+                # [[1.0, 2.0, 3.0], [2.0, 3.0, 4.0]]
+                # >> >
+                # >> > torch.tensor(a).mean(dim=0)
+                # tensor([1.5000, 2.5000, 3.5000])
                 out = poolingInput.mean(dim=0)
+                # print('--out--')
                 # print(out)
                 # print(out.size())
                 # exit()

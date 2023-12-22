@@ -14,7 +14,7 @@ from transformers import AutoTokenizer
 
 # my module
 import lineNotifier
-from pretrain_lstm import Specter
+from finetune_lstm_share_label import Specter
 
 """
 SPECTER + LSTM を用いて、BERTの最終層の全ての出力を用いて
@@ -24,8 +24,8 @@ SPECTER + LSTM を用いて、BERTの最終層の全ての出力を用いて
 
 def main():
     # 以下をモデルに合わせて変更する
-    modelType = "pretrain_lstm_2023_10_16"
-    modelParamPath = f"../dataserver/model_outputs/specter/pretrain_lstm_2023_10_16/checkpoints/*"
+    modelType = "finetune_lstm_share_label"
+    modelParamPath = f"../dataserver/model_outputs/specter/finetune_lstm_share_label/checkpoints" + "/*"
 
     # Axcellのデータサイズ(基本medium)
     size = "medium"
@@ -184,7 +184,7 @@ def main():
             # exit()
             # 各トークンをBERTに通す
             input = input.to('cuda:0')
-            output = model.bert(**input)[0][0]
+            output = model.forward(**input)[0][0]
 
             # print(output)
             # print(output.size())

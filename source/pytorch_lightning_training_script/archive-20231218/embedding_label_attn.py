@@ -2,7 +2,6 @@
 import json
 import traceback
 import os
-import time
 import shutil
 import glob
 
@@ -14,20 +13,20 @@ from transformers import AutoTokenizer
 
 # my module
 import lineNotifier
-from pretrain_average_pooling import Specter
+from finetune_attn_label import Specter
+from inc.MyDataset import MyDataset
+from inc.util import find_model_checkpoint, load_data, save_data
 
 """
-SPECTER + Average Pooling を用いて、BERTの最終層の全ての出力を用いて
+SPECTER + Attntion Pooling を用いて、BERTの最終層の全ての出力を用いて
 観点ごとの論文埋め込みを取得する
 """
-
-
 def main():
     # 以下をモデルに合わせて変更する
     # modelType = "average_pooling"
     # modelParamPath = f"../dataserver/model_outputs/specter/20230503/version_average_pooling/checkpoints/*"
-    modelType = "pretrain_average_pooling"
-    modelParamPath = f"../dataserver/model_outputs/specter/pretrain_average_pooling/checkpoints" + "/*"
+    modelType = "finetune_label-attn-scibert-correct-totalstep"
+    modelParamPath = f"../dataserver/model_outputs/specter/finetune_label-attn-scibert-correct-totalstep/checkpoints" + "/*"
 
     # Axcellのデータサイズ(基本medium)
     size = "medium"
@@ -36,12 +35,7 @@ def main():
     labelList = ["title", "bg", "obj", "method", "res"]
 
     # モデルパラメータのパス
-    epoch = 1
-    files = glob.glob(modelParamPath)
-    for filePath in files:
-        if f"ep-epoch={epoch}" in filePath:
-            modelCheckpoint = filePath
-            break
+    modelCheckpoint = find_model_checkpoint(modelParamPath)
 
     outputName = modelType
 
@@ -62,15 +56,11 @@ def main():
     sscOutputPath = dirPath + "/resultSSC.txt"
 
     # データセットをロード
-    with open(dataPath, 'r') as f:
-        paperDict = json.load(f)
-
-    with open(outputDirPath + "paperDict.json", "w") as f:
-        json.dump(paperDict, f, indent=4)
+    paperDict = load_data(dataPath)
+    save_data(paperDict, outputDirPath + "paperDict.json")
 
     # 分類されたアブストラクトをロード
-    with open(labeledAbstPath, 'r') as f:
-        labeledAbstDict = json.load(f)
+    labeledAbstDict = load_data(labeledAbstPath)
 
     shutil.copy(labeledAbstPath, outputDirPath)
 
@@ -108,11 +98,6 @@ def main():
 
         sscPaperDict[title] = text_list
 
-        # if "No Need" in title:
-        #     print(title)
-    # print(sscPaperDict)
-    # exit()
-
     try:
         # 出力用の辞書
         labeledAbstEmbedding = {}
@@ -120,18 +105,16 @@ def main():
         # モデルの初期化
         tokenizer = AutoTokenizer.from_pretrained('allenai/specter')
         model = Specter.load_from_checkpoint(modelCheckpoint)
-        # print(model.lstm)
-        # exit()
-        # model.cuda(1)
         model.cuda()
         model.eval()
+
+        my_dataset = MyDataset(None, None, None)
 
         print("--path: {}--".format(modelCheckpoint))
 
         # 埋め込み
         for title, paper in paperDict.items():
             labeledAbstEmbedding[title] = {}
-
             ssc = sscPaperDict[title]
 
             # Title + [SEP] + Abstract
@@ -145,98 +128,21 @@ def main():
                 max_length=512
             )
 
-            # input['input_ids'][0](トークナイズされた入力文)と同じ長さで、その位置のトークンのラベルを格納するリスト
-            label_positions = [None for i in range(len(
-                input['input_ids'][0].tolist()))]
-
-            # titleの位置にラベルを格納する
-            # SEPトークンの位置を特定する
-            sep_pos = input['input_ids'][0].tolist().index(102)
-            for i in range(1, sep_pos):
-                label_positions[i] = 'title'
-            # print(input['input_ids'][0].tolist())
-            # print(sep_pos)
-            # print(label_positions)
-            # exit()
-
-            # 各トークンの観点をlabel_positionsに格納
-            for text_label_pair in ssc:
-                text = text_label_pair[0]
-                label = text_label_pair[1]
-
-                # 1文単位でtokenizeする
-                tokenizedText = tokenizer(
-                    text,
-                    return_tensors="pt",
-                    max_length=512
-                )
-                # 先頭の101([CLS])と末尾の102([SEP])を取り除く
-                tokenizedText_input_ids = tokenizedText['input_ids'][0][1:-1].tolist()
-                # print(tokenizedText_input_ids)
-                # exit()
-
-                start, end = find_subarray(
-                    input['input_ids'][0].tolist(), tokenizedText_input_ids)
-                for i in range(start, end+1):
-                    label_positions[i] = label
-                # print(start, end)
-                # print(label_positions)
-            # print(input)
-
-            # exit()
             # 各トークンをBERTに通す
             input = input.to('cuda:0')
-            output = model.bert(**input)[0][0]
-
-            # debug
-            # output = model.model(**input)['last_hidden_state']
+            output = model.bert(**input)['last_hidden_state']
             # print(output)
-            # output2 = output.max(dim=1)
-            # print(output2)
-            # print(output2.size())
-            # exit()
+            # print(model.bert(**input))
 
-            # print(output)
-            # print(output.size())
-            # exit()
+            _, label_list_for_words = my_dataset.tokenize_with_label(title_abs, ssc, tokenizer)
+            label_pooling = model.label_pooling(output, torch.tensor([label_list_for_words]))[0]
 
-            # output_format = output.tolist()
-            # print(output)
-            # print(count, labeledAbstDict[title][label])
-
-            # 観点ごとにBERT最終層出力を配列にまとめる
-            label_last_hideen_state = {label: [] for label in labelList}
-            for i, tensor in enumerate(output):
-                # print(tensor)
-                # [CLS]or [SEP]の時
-                if label_positions[i] == None or label_positions[i] == "other":
-                    continue
-                label_last_hideen_state[label_positions[i]].append(
-                    tensor.tolist())
-
-            # 観点ごとのBERT出力でaverage pooling
             for label in labelList:
-                if len(label_last_hideen_state[label]) == 0:
+                if label_pooling[label] == None or len(label_pooling[label]) == 0:
                     labeledAbstEmbedding[title][label] = None
                     continue
-                # print(label_last_hideen_state[label])
-                # poolingInput = torch.tensor(
-                #     label_last_hideen_state[label]).unsqueeze(0).to('cuda:0')
-                poolingInput = torch.tensor(
-                    label_last_hideen_state[label]).to('cuda:0')
-                # [n, 768]の場合はmean()の次元はdim=0 でOK
-                # >> > a
-                # [[1.0, 2.0, 3.0], [2.0, 3.0, 4.0]]
-                # >> >
-                # >> > torch.tensor(a).mean(dim=0)
-                # tensor([1.5000, 2.5000, 3.5000])
-                out = poolingInput.mean(dim=0)
-                # print('--out--')
-                # print(out)
-                # print(out.size())
-                # exit()
                 # 出力用の辞書に格納
-                labeledAbstEmbedding[title][label] = out.tolist()
+                labeledAbstEmbedding[title][label] = label_pooling[label].tolist()
 
         # ファイル出力
         # labeledAbstSpecter.jsonの名称は評価プログラムでも使っているため変更しない

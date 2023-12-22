@@ -33,10 +33,21 @@ import re
 
 # wandb
 from pytorch_lightning.loggers import WandbLogger
-from pretrain_average_pooling import Specter
+import wandb
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+# import torch
+# import torch.nn as nn
+# import torch.optim as optim
+# import torch.nn.functional as F
+
+# from torchviz import make_dot
+# from IPython.display import display
 
 """
-単語位置出力を観点ごとにaverage poolingして観点埋め込みを生成し，
+単語位置出力を観点ごとにLSTMで集約して観点埋め込みを生成し，
 Finetuning
 """
 
@@ -62,7 +73,7 @@ arg_to_scheduler = {
 arg_to_scheduler_choices = sorted(arg_to_scheduler.keys())
 arg_to_scheduler_metavar = "{" + ", ".join(arg_to_scheduler_choices) + "}"
 
-
+bertOutputSize = 768
 
 """
 自分で定義するデータセット
@@ -307,7 +318,7 @@ class TripletLoss(nn.Module):
 """
 モデルのクラス
 """
-class SpecterFT(pl.LightningModule):
+class Specter(pl.LightningModule):
     def __init__(self, init_args):
         super().__init__()
         self.save_hyperparameters()
@@ -320,26 +331,25 @@ class SpecterFT(pl.LightningModule):
         self.hparams = init_args
 
         # SciBERTを初期値
-        # self.model = AutoModel.from_pretrained("allenai/scibert_scivocab_cased")
+        # self.bert = AutoModel.from_pretrained("allenai/scibert_scivocab_cased")
         # self.tokenizer = AutoTokenizer.from_pretrained("allenai/scibert_scivocab_cased")
         
         # SPECTERを初期値とする場合
-        # self.bert = AutoModel.from_pretrained("allenai/specter")
-        # self.tokenizer = AutoTokenizer.from_pretrained("allenai/specter")
-
-        # Average Pooling Specterを初期値
-        modelCheckpoint = '/workspace/dataserver/model_outputs/specter/pretrain_average_pooling/checkpoints/ep-epoch=1_avg_val_loss-avg_val_loss=0.260-v0.ckpt'
-        self.bert = Specter.load_from_checkpoint(modelCheckpoint).bert
+        self.bert = AutoModel.from_pretrained("allenai/specter")
         self.tokenizer = AutoTokenizer.from_pretrained("allenai/specter")
 
         self.tokenizer.model_max_length = self.bert.config.max_position_embeddings
         self.hparams.seqlen = self.bert.config.max_position_embeddings
         self.triple_loss = TripletLoss(margin=float(init_args.margin))
         
-        # cosine類似度も試す
-        # self.triple_loss = TripletLoss(
-        #     distance='cosine', margin=float(init_args.margin))
-        
+        # BERTの出力トークンを統合するレイヤー
+        # input_size: 各時刻における入力ベクトルのサイズ、ここではBERTの出力の768次元になる
+        # hidden_size: メモリセルとかゲートの隠れ層の次元、出力のベクトルの次元もこの値になる（Batch_size, sequence_length, hidden_size)
+        #   chatGPTによると一般的には、LSTMの隠れ層の次元は、入力データの次元と同じであることが多い
+        self.lstm = nn.LSTM(input_size=bertOutputSize,
+                            hidden_size=bertOutputSize, batch_first=True)
+
+
         # number of training instances
         self.training_size = None
         # number of testing instances
@@ -421,7 +431,7 @@ class SpecterFT(pl.LightningModule):
             self.hparams.grad_accum * num_devices
         # dataset_size = len(self.train_loader.dataset)
         """The size of the training data need to be coded with more accurate number"""
-        dataset_size = training_size
+        dataset_size = len(self._get_loader("train"))
         return (dataset_size / effective_batch_size) * self.hparams.num_epochs
 
     def get_lr_scheduler(self):
@@ -435,15 +445,19 @@ class SpecterFT(pl.LightningModule):
 
     def configure_optimizers(self):
         """Prepare optimizer and schedule (linear warmup and decay)"""
-        model = self.bert
         no_decay = ["bias", "LayerNorm.weight"]
+
+        # Combine parameters of BERT and LSTM
+        model_parameters = list(self.bert.named_parameters()) + \
+            list(self.lstm.named_parameters())
+        
         optimizer_grouped_parameters = [
             {
-                "params": [p for n, p in model.named_parameters() if not any(nd in n for nd in no_decay)],
+                "params": [p for n, p in model_parameters if not any(nd in n for nd in no_decay)],
                 "weight_decay": self.hparams.weight_decay,
             },
             {
-                "params": [p for n, p in model.named_parameters() if any(nd in n for nd in no_decay)],
+                "params": [p for n, p in model_parameters if any(nd in n for nd in no_decay)],
                 "weight_decay": 0.0,
             },
         ]
@@ -463,12 +477,12 @@ class SpecterFT(pl.LightningModule):
         return [optimizer], [scheduler]
 
     def training_step(self, batch, batch_idx):
-        # source_embedding = self.bert(**batch[0])[1] # [1]はpooler_outputのこと　https://huggingface.co/docs/transformers/model_doc/bert#transformers.BertModel
-        # pos_embedding = self.bert(**batch[1])[1]
-        # neg_embedding = self.bert(**batch[2])[1]
-        source_embedding = self.forward(**batch[0]["input"])['last_hidden_state']
-        pos_embedding = self.forward(**batch[1]["input"])['last_hidden_state']
-        neg_embedding = self.forward(**batch[2]["input"])['last_hidden_state']
+        # source_embedding = self.model(**batch[0])[1] # [1]はpooler_outputのこと　https://huggingface.co/docs/transformers/model_doc/bert#transformers.BertModel
+        # pos_embedding = self.model(**batch[1])[1]
+        # neg_embedding = self.model(**batch[2])[1]
+        source_embedding = self.bert(**batch[0]["input"])['last_hidden_state']
+        pos_embedding = self.bert(**batch[1]["input"])['last_hidden_state']
+        neg_embedding = self.bert(**batch[2]["input"])['last_hidden_state']
         # last hidden stateのtensor形状は
         # ( バッチサイズ, 系列長(512), 次元数(768) )
 
@@ -519,12 +533,12 @@ class SpecterFT(pl.LightningModule):
         return {"loss": loss}
 
     def validation_step(self, batch, batch_idx):
-        # source_embedding = self.bert(**batch[0])[1] # [1]はpooler_outputのこと　https://huggingface.co/docs/transformers/model_doc/bert#transformers.BertModel
-        # pos_embedding = self.bert(**batch[1])[1]
-        # neg_embedding = self.bert(**batch[2])[1]
-        source_embedding = self.forward(**batch[0]["input"])['last_hidden_state']
-        pos_embedding = self.forward(**batch[1]["input"])['last_hidden_state']
-        neg_embedding = self.forward(**batch[2]["input"])['last_hidden_state']
+        # source_embedding = self.model(**batch[0])[1] # [1]はpooler_outputのこと　https://huggingface.co/docs/transformers/model_doc/bert#transformers.BertModel
+        # pos_embedding = self.model(**batch[1])[1]
+        # neg_embedding = self.model(**batch[2])[1]
+        source_embedding = self.bert(**batch[0]["input"])['last_hidden_state']
+        pos_embedding = self.bert(**batch[1]["input"])['last_hidden_state']
+        neg_embedding = self.bert(**batch[2]["input"])['last_hidden_state']
         # last hidden stateのtensor形状は
         # ( バッチサイズ, 系列長(512), 次元数(768) )
 
@@ -548,6 +562,8 @@ class SpecterFT(pl.LightningModule):
                     valid_label_list.append(label)
                     # debug print
                     print("--", label)
+
+                    print(source_label_pooling[b][label])
                     label_loss += self.triple_loss(
                         source_label_pooling[b][label], pos_label_pooling[b][label], neg_label_pooling[b][label])
 
@@ -562,6 +578,9 @@ class SpecterFT(pl.LightningModule):
             loss = batch_label_loss / label_loss_calculated_count
         else:
             loss = 0
+
+        if self.debug:
+            return {"loss": loss}
 
         self.log('val_loss', loss, on_step=True, on_epoch=False, prog_bar=True)
         return {'val_loss': loss}
@@ -645,9 +664,13 @@ class SpecterFT(pl.LightningModule):
                 if len(label_last_hidden_state[label]) > 0:
                     label_last_hidden_state_tensor = torch.stack(
                         label_last_hidden_state[label])
-                    # print(label_last_hidden_state_tensor)
-                    label_pooling[label] = label_last_hidden_state_tensor.mean(
-                        dim=0)
+                    # outputに各単語に対応する隠れ層の出力（単語数×次元数のtensor）, _ に最後の単語に対応する隠れ層の出力とCtのタプル
+                    # つまり，outputの最後の要素を予測に利用する
+                    # 参考: https://qiita.com/m__k/items/841950a57a0d7ff05506#%E3%83%A2%E3%83%87%E3%83%AB%E5%AE%9A%E7%BE%A9
+                    output, _ = self.lstm(
+                        label_last_hidden_state_tensor, None)
+                    
+                    label_pooling[label] = output[-1]
                 else:
                     label_pooling[label] = None
 
@@ -736,6 +759,8 @@ def get_train_params(args):
     return train_params
 
 # LINEに通知する関数
+
+
 def line_notify(message):
     line_notify_token = 'Jou3ZkH4ajtSTaIWO3POoQvvCJQIdXFyYUaRKlZhHMI'
     line_notify_api = 'https://notify-api.line.me/api/notify'
@@ -765,7 +790,7 @@ def main():
 
         if args.test_only:
             print('loading model...')
-            model = SpecterFT.load_from_checkpoint(args.test_checkpoint)
+            model = Specter.load_from_checkpoint(args.test_checkpoint)
             trainer = pl.Trainer(
                 gpus=args.gpus, limit_val_batches=args.limit_val_batches)
             trainer.test(model)
@@ -792,7 +817,7 @@ def main():
             args.label_dict = label_dict
             args.num_label_dict = num_label_dict
 
-            model = SpecterFT(args)
+            model = Specter(args)
 
             # default logger used by trainer
             logger = TensorBoardLogger(
@@ -815,12 +840,16 @@ def main():
             )
 
             extra_train_params = get_train_params(args)
-            wandb_logger = WandbLogger(project="SPECTER-AveragePooling-label-finetuning",
-                                       tags=["SPECTER", "AveragePooling", "label", 'Finetuning'])
+            wandb.init(project='SPECTER-LSTM-label')
+            wandb_logger = WandbLogger(project="SPECTER-LSTM-share-label",
+                                       tags=["SPECTER", "LSTM", "label"])
 
             trainer = pl.Trainer(logger=wandb_logger,
                                  checkpoint_callback=checkpoint_callback,
                                  **extra_train_params)
+
+            # 計算グラフの可視化
+            wandb.watch(model, log='all')
 
             trainer.fit(model)
 

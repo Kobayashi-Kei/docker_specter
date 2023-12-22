@@ -14,18 +14,20 @@ from transformers import AutoTokenizer
 
 # my module
 import lineNotifier
-from finetune_lstm_share_label import Specter
+from finetune_average_pooling_label import SpecterFT
 
 """
-SPECTER + LSTM を用いて、BERTの最終層の全ての出力を用いて
+SPECTER + Average Pooling を用いて、BERTの最終層の全ての出力を用いて
 観点ごとの論文埋め込みを取得する
 """
 
 
 def main():
     # 以下をモデルに合わせて変更する
-    modelType = "specter_lstm"
-    modelParamPath = f"../dataserver/model_outputs/specter/paper_specter_lstm/checkpoints" + "/*"
+    # modelType = "average_pooling"
+    # modelParamPath = f"../dataserver/model_outputs/specter/20230503/version_average_pooling/checkpoints/*"
+    modelType = "finetune_average_pooling_label-embft"
+    modelParamPath = f"../dataserver/model_outputs/specter/finetune_average_pooling_label/checkpoints" + "/*" 
 
     # Axcellのデータサイズ(基本medium)
     size = "medium"
@@ -117,7 +119,7 @@ def main():
 
         # モデルの初期化
         tokenizer = AutoTokenizer.from_pretrained('allenai/specter')
-        model = Specter.load_from_checkpoint(modelCheckpoint)
+        model = SpecterFT.load_from_checkpoint(modelCheckpoint)
         # print(model.lstm)
         # exit()
         # model.cuda(1)
@@ -186,6 +188,14 @@ def main():
             input = input.to('cuda:0')
             output = model.forward(**input)[0][0]
 
+            # debug
+            # output = model.model(**input)['last_hidden_state']
+            # print(output)
+            # output2 = output.max(dim=1)
+            # print(output2)
+            # print(output2.size())
+            # exit()
+
             # print(output)
             # print(output.size())
             # exit()
@@ -204,19 +214,22 @@ def main():
                 label_last_hideen_state[label_positions[i]].append(
                     tensor.tolist())
 
-            # 観点ごとのBERT出力をLSTMに通す
+            # 観点ごとのBERT出力でaverage pooling
             for label in labelList:
                 if len(label_last_hideen_state[label]) == 0:
                     labeledAbstEmbedding[title][label] = None
                     continue
                 # print(label_last_hideen_state[label])
-                lstmInput = torch.tensor(
-                    label_last_hideen_state[label]).unsqueeze(0).to('cuda:0')
-                out, _ = model.lstm(lstmInput, None)
-                # print(out[:, -1, :])
-                # print(out[:, -1, :].size())
+                # poolingInput = torch.tensor(
+                #     label_last_hideen_state[label]).unsqueeze(0).to('cuda:0')
+                poolingInput = torch.tensor(
+                    label_last_hideen_state[label]).to('cuda:0')
+                out = poolingInput.mean(dim=0)
+                # print(out)
+                # print(out.size())
+                # exit()
                 # 出力用の辞書に格納
-                labeledAbstEmbedding[title][label] = out[:, -1, :].tolist()[0]
+                labeledAbstEmbedding[title][label] = out.tolist()
 
         # ファイル出力
         # labeledAbstSpecter.jsonの名称は評価プログラムでも使っているため変更しない

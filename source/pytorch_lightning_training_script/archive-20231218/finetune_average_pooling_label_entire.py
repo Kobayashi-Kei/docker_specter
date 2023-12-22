@@ -419,7 +419,7 @@ class Specter(pl.LightningModule):
             self.hparams.grad_accum * num_devices
         # dataset_size = len(self.train_loader.dataset)
         """The size of the training data need to be coded with more accurate number"""
-        dataset_size = training_size
+        dataset_size = len(self._get_loader("train"))
         return (dataset_size / effective_batch_size) * self.hparams.num_epochs
 
     def get_lr_scheduler(self):

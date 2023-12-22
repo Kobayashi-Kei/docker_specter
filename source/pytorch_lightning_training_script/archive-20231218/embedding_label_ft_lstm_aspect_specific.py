@@ -24,8 +24,8 @@ SPECTER + LSTM を用いて、BERTの最終層の全ての出力を用いて
 
 def main():
     # 以下をモデルに合わせて変更する
-    modelType = "specter_lstm"
-    modelParamPath = f"../dataserver/model_outputs/specter/paper_specter_lstm/checkpoints" + "/*"
+    modelType = "finetune_label-lstm_aspect_specific-scibert"
+    modelParamPath = f"../dataserver/model_outputs/specter/finetune_label-lstm_aspect_specific-scibert/checkpoints" + "/*"
 
     # Axcellのデータサイズ(基本medium)
     size = "medium"
