@@ -183,3 +183,5 @@ pretrain_conv.py
 
 wandb/
 .env
+output.txt
+tmpRun.json

@@ -33,8 +33,8 @@ class Specter(SpecterOrigin):
                             hidden_size=self.bert.config.hidden_size, batch_first=True)
 
     def calc_label_total_loss(self, source_label_pooling, pos_label_pooling, neg_label_pooling):
-        batch_label_loss = 0
-        label_loss_calculated_count = 0
+        losses = torch.tensor(0.0, requires_grad=True).to(device=self.hparams.device)
+        valid_batch = 0
         for b in range(len(source_label_pooling)):  # batchsizeの数だけループ
             label_loss = 0
             valid_label_list = []
@@ -47,23 +47,17 @@ class Specter(SpecterOrigin):
                         source_label_pooling[b][label], pos_label_pooling[b][label], neg_label_pooling[b][label])
 
             if len(valid_label_list) > 0:
-                batch_label_loss += label_loss/len(valid_label_list)
-                label_loss_calculated_count += 1
+                losses += label_loss / len(valid_label_list)
+                valid_batch += 1
 
-        """
-        一致する観点がなければlossは0
-        """
-        if label_loss_calculated_count > 0:
-            loss = batch_label_loss / label_loss_calculated_count
+        if valid_batch > 0:
+            return losses / valid_batch
         else:
-            loss = torch.tensor(0.0, requires_grad=True)
-
-        return loss
+            return losses
 
     def label_pooling(self, batch_last_hidden_state, batch_position_label_list):
         batch_size = batch_last_hidden_state.size(0)
-        label_dict = self.hparams.label_dict
-        num_label_dict = self.hparams.num_label_dict
+        
         batch_label_pooling = []
         # print()
         # print("--batch_last_hidden_state--")
@@ -147,16 +141,14 @@ def main():
 
         save_dir = f'/workspace/dataserver/model_outputs/specter/{args.version}/'
 
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
         # wandbの初期化
-        wandb.init(project=args.version, config=args)
+        wandb.init(project=args.version, config=args) # type: ignore # type: ignore
 
         # 学習のメインプログラム
         model = Specter(args).to(args.device)
         optimizer, scheduler = model.configure_optimizers()
-        train_loader = model._get_loader("train")
-        val_loader = model._get_loader("dev")
+        train_loader = model._get_loader("train", args.data_name)
+        val_loader = model._get_loader("dev", args.data_name)
 
         # val_loss = validate(model, val_loader, args.device)
         # print(f"Init, Val Loss: {val_loss}")
@@ -166,7 +158,7 @@ def main():
             print(f"Epoch {epoch}, Val Loss: {val_loss}")
             save_checkpoint(model, optimizer,save_dir, f"ep-epoch={epoch}.pth.tar")
         
-        wandb.finish()
+        
 
         # 終了処理（LINE通知，casheとロギングの終了）
         line_notify("172.21.64.47:" + os.path.basename(__file__) + "が終了")
@@ -174,7 +166,7 @@ def main():
         model.eval()
         tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
         paperDict, sscPaperDict, outputEmbLabelDirPath = prepareData(args.version)
-        labeledAbstEmbedding = embedding(model, tokenizer, paperDict, sscPaperDict)
+        labeledAbstEmbedding = embedding(model, tokenizer, paperDict, sscPaperDict, args.device)
         save_embedding(labeledAbstEmbedding, outputEmbLabelDirPath)
         
         score_dict = eval_ranking_metrics(f"medium-{args.version}", '../dataserver/axcell/')
@@ -186,7 +178,9 @@ def main():
             score_dict['recall@10'], 
             score_dict['recall@20']
         ))
-
+        wandb.log(score_dict)
+        
+        wandb.finish()
         torch.cuda.empty_cache()
         
 

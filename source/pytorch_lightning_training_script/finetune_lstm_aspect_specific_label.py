@@ -1,6 +1,9 @@
 # transformers, pytorch
+from transformers.optimization import (
+    Adafactor,
+)
 from transformers import AutoTokenizer, AutoModel
-
+from transformers import AdamW
 import torch
 
 # basic python packages
@@ -33,16 +36,67 @@ class Specter(SpecterOrigin):
                             hidden_size=self.bert.config.hidden_size, batch_first=True)
         self.lstm_bg = torch.nn.LSTM(input_size=self.bert.config.hidden_size,
                             hidden_size=self.bert.config.hidden_size, batch_first=True)
-        self.lstm_obj = torch.nn.LSTM(input_size=self.bert.config.hidden_size,
-                            hidden_size=self.bert.config.hidden_size, batch_first=True)
+        # self.lstm_obj = torch.nn.LSTM(input_size=self.bert.config.hidden_size,
+        #                     hidden_size=self.bert.config.hidden_size, batch_first=True)
         self.lstm_method = torch.nn.LSTM(input_size=self.bert.config.hidden_size,
                             hidden_size=self.bert.config.hidden_size, batch_first=True)
         self.lstm_res = torch.nn.LSTM(input_size=self.bert.config.hidden_size,
                              hidden_size=self.bert.config.hidden_size, batch_first=True)
 
+    def configure_optimizers(self):
+        """Prepare optimizer and schedule (linear warmup and decay)"""
+
+        # weight decay 重み減衰：過学習を減らすためにparameterの自由度を減らす
+        optimizer_grouped_parameters = [
+            {
+                "params": [],
+                "weight_decay": 0.0,
+            },
+            {
+                "params": [],
+                "weight_decay": self.hparams.weight_decay,
+                # "weight_decay": 0.0,
+            },
+        ]
+        bert_params = self.make_parameter_group(self.bert)
+        optimizer_grouped_parameters[0]['params'].extend(bert_params['no_decay'])
+        optimizer_grouped_parameters[1]['params'].extend(bert_params['decay'])
+
+        lstm_params = self.make_parameter_group(self.lstm_title)
+        optimizer_grouped_parameters[0]['params'].extend(lstm_params['no_decay'])
+        optimizer_grouped_parameters[1]['params'].extend(lstm_params['decay'])
+        lstm_params = self.make_parameter_group(self.lstm_bg)
+        optimizer_grouped_parameters[0]['params'].extend(lstm_params['no_decay'])
+        optimizer_grouped_parameters[1]['params'].extend(lstm_params['decay'])
+        # lstm_params = self.make_parameter_group(self.lstm_obj)
+        # optimizer_grouped_parameters[0]['params'].extend(lstm_params['no_decay'])
+        # optimizer_grouped_parameters[1]['params'].extend(lstm_params['decay'])
+        lstm_params = self.make_parameter_group(self.lstm_method)
+        optimizer_grouped_parameters[0]['params'].extend(lstm_params['no_decay'])
+        optimizer_grouped_parameters[1]['params'].extend(lstm_params['decay'])
+        lstm_params = self.make_parameter_group(self.lstm_res)
+        optimizer_grouped_parameters[0]['params'].extend(lstm_params['no_decay'])
+        optimizer_grouped_parameters[1]['params'].extend(lstm_params['decay'])
+        if self.hparams.adafactor:
+            optimizer = Adafactor(
+                optimizer_grouped_parameters, lr=self.hparams.lr, scale_parameter=False, relative_step=False
+            )
+
+        else:
+            optimizer = AdamW(
+                optimizer_grouped_parameters, lr=self.hparams.lr, eps=self.hparams.adam_epsilon # type: ignore # type: ignore
+            )
+
+        self.opt = optimizer
+        
+        # get_lr_scheduler内でself.optを渡す
+        scheduler = self.get_lr_scheduler()
+
+        return optimizer, scheduler
+    
     def calc_label_total_loss(self, source_label_pooling, pos_label_pooling, neg_label_pooling):
-        batch_label_loss = 0
-        label_loss_calculated_count = 0
+        losses = torch.tensor(0.0, requires_grad=True).to(device=self.hparams.device)
+        valid_batch = 0
         for b in range(len(source_label_pooling)):  # batchsizeの数だけループ
             label_loss = 0
             valid_label_list = []
@@ -55,23 +109,17 @@ class Specter(SpecterOrigin):
                         source_label_pooling[b][label], pos_label_pooling[b][label], neg_label_pooling[b][label])
 
             if len(valid_label_list) > 0:
-                batch_label_loss += label_loss/len(valid_label_list)
-                label_loss_calculated_count += 1
+                losses += label_loss / len(valid_label_list)
+                valid_batch += 1
 
-        """
-        一致する観点がなければlossは0
-        """
-        if label_loss_calculated_count > 0:
-            loss = batch_label_loss / label_loss_calculated_count
+        if valid_batch > 0:
+            return losses / valid_batch
         else:
-            loss = torch.tensor(0.0, requires_grad=True)
-
-        return loss
+            return losses
 
     def label_pooling(self, batch_last_hidden_state, batch_position_label_list):
         batch_size = batch_last_hidden_state.size(0)
-        label_dict = self.hparams.label_dict
-        num_label_dict = self.hparams.num_label_dict
+        
         batch_label_pooling = []
         # print()
         # print("--batch_last_hidden_state--")
@@ -128,8 +176,11 @@ class Specter(SpecterOrigin):
                     elif label == 'title':
                         output, _ = self.lstm_title(
                             label_last_hidden_state_tensor, None)
-                    
-                    label_pooling[label] = output[-1]
+                    elif label == 'other':
+                        label_pooling[label] = None
+                        continue
+
+                    label_pooling[label] = output[-1] #type: ignore
                 else:
                     label_pooling[label] = None
 
@@ -145,6 +196,43 @@ class Specter(SpecterOrigin):
         #         if label == "obj":
         #             exit()
         return batch_label_pooling
+
+def train_this(model, train_loader, optimizer, scheduler, device, epoch, embedding, is_track_score=True):
+    model.train()
+    for i, batch in enumerate(train_loader):
+        # backwardパスを実行する前に常にそれまでに計算された勾配をクリアする
+        # RNNでは勾配の累積は便利だからpytorchは勾配のクリアを自動で行わない
+        optimizer.zero_grad()
+        batch = preprocess_batch(batch, device)
+        loss = model.training_step(batch, i)
+        loss.backward()
+        optimizer.step()
+        scheduler.step()      
+
+        wandb.log({"train_loss": loss.item()})
+        
+        """
+        attention やschedulerが正しく更新されているかのチェック
+        """
+        # scheduler の学習率
+        wandb.log({f'scheduler_lr_batch_{str(epoch)}': scheduler.get_last_lr()[0]})        
+        wandb.log({f"bert_grad": calculate_gradient_norm(model.bert)})
+
+        if is_track_score:
+            """
+            評価
+            """
+            if i % 5000 == 0:
+                model.eval()
+                tokenizer = AutoTokenizer.from_pretrained("allenai/scibert_scivocab_cased")
+                paperDict, sscPaperDict, outputEmbLabelDirPath = prepareData(f"{model.hparams.version}-{str(i)}")
+                labeledAbstEmbedding = embedding(model, tokenizer, paperDict, sscPaperDict, device)
+                save_embedding(labeledAbstEmbedding, outputEmbLabelDirPath)
+            
+                score_dict = eval_ranking_metrics(f"medium-{model.hparams.version}-{str(i)}", '../dataserver/axcell/')
+                wandb.log(score_dict)
+                model.train()
+
 
     
 def main():
@@ -170,23 +258,23 @@ def main():
         save_dir = f'/workspace/dataserver/model_outputs/specter/{args.version}/'
 
         # wandbの初期化
-        wandb.init(project=args.version, config=args)
+        wandb.init(project=args.version, config=args) # type: ignore
 
         # 学習のメインプログラム
         model = Specter(args).to(args.device)
         optimizer, scheduler = model.configure_optimizers()
-        train_loader = model._get_loader("train")
-        val_loader = model._get_loader("dev")
+        train_loader = model._get_loader("train", args.data_name)
+        val_loader = model._get_loader("dev", args.data_name)
 
         # val_loss = validate(model, val_loader, args.device)
         # print(f"Init, Val Loss: {val_loss}")
         for epoch in range(args.num_epochs):
-            train(model, train_loader, optimizer, scheduler, args.device, epoch, embedding)
+            train_this(model, train_loader, optimizer, scheduler, args.device, epoch, embedding)
             val_loss = validate(model, val_loader, args.device)
             print(f"Epoch {epoch}, Val Loss: {val_loss}")
             save_checkpoint(model, optimizer,save_dir, f"ep-epoch={epoch}.pth.tar")
         
-        wandb.finish()
+        
 
         # 終了処理（LINE通知，casheとロギングの終了）
         line_notify("172.21.64.47:" + os.path.basename(__file__) + "が終了")
@@ -194,7 +282,7 @@ def main():
         model.eval()
         tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
         paperDict, sscPaperDict, outputEmbLabelDirPath = prepareData(args.version)
-        labeledAbstEmbedding = embedding(model, tokenizer, paperDict, sscPaperDict)
+        labeledAbstEmbedding = embedding(model, tokenizer, paperDict, sscPaperDict, args.device)
         save_embedding(labeledAbstEmbedding, outputEmbLabelDirPath)
         
         score_dict = eval_ranking_metrics(f"medium-{args.version}", '../dataserver/axcell/')
@@ -206,7 +294,9 @@ def main():
             score_dict['recall@10'], 
             score_dict['recall@20']
         ))
-
+        wandb.log(score_dict)
+        
+        wandb.finish()
         torch.cuda.empty_cache()
         
 

@@ -176,7 +176,6 @@ def parse_args(arg_to_scheduler_choices, arg_to_scheduler_metavar):
                         help="kwarg passed to DataLoader")
     parser.add_argument("--adafactor", action="store_true")
     parser.add_argument('--is_key_transform', default=False, action="store_true")
-    parser.add_argument('---gpu', default=0)
 
     parser.add_argument('--num_samples', default=None, type=int)
     parser.add_argument("--lr_scheduler",
@@ -186,6 +185,8 @@ def parse_args(arg_to_scheduler_choices, arg_to_scheduler_metavar):
                         type=str,
                         help="Learning rate scheduler")
     parser.add_argument("--data_name", default='axcell')
+    parser.add_argument('--gpu', default=0)
+
     args = parser.parse_args()
 
     args.device = torch.device(f"cuda:{args.gpu}" if torch.cuda.is_available() else "cpu")
@@ -268,7 +269,7 @@ def train(model, train_loader, optimizer, scheduler, device, epoch, embedding, i
                 model.eval()
                 tokenizer = AutoTokenizer.from_pretrained("allenai/scibert_scivocab_cased")
                 paperDict, sscPaperDict, outputEmbLabelDirPath = prepareData(f"{model.hparams.version}-{str(i)}")
-                labeledAbstEmbedding = embedding(model, tokenizer, paperDict, sscPaperDict)
+                labeledAbstEmbedding = embedding(model, tokenizer, paperDict, sscPaperDict, device)
                 save_embedding(labeledAbstEmbedding, outputEmbLabelDirPath)
             
                 score_dict = eval_ranking_metrics(f"medium-{model.hparams.version}-{str(i)}", '../dataserver/axcell/')
@@ -289,6 +290,17 @@ def validate(model, val_loader, device):
 
     return average_val_loss
 
+
+def eval_axcell():
+    model.eval()
+    tokenizer = AutoTokenizer.from_pretrained("allenai/scibert_scivocab_cased")
+    paperDict, sscPaperDict, outputEmbLabelDirPath = prepareData(f"{model.hparams.version}-{str(i)}")
+    labeledAbstEmbedding = embedding(model, tokenizer, paperDict, sscPaperDict, device)
+    save_embedding(labeledAbstEmbedding, outputEmbLabelDirPath)
+
+    score_dict = eval_ranking_metrics(f"medium-{model.hparams.version}-{str(i)}", '../dataserver/axcell/')
+    wandb.log(score_dict)
+    model.train()
 
 def embedding(model, tokenizer, paperDict, sscPaperDict, device): 
     # 出力用の辞書

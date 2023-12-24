@@ -31,11 +31,12 @@ class Specter(SpecterOrigin):
         super().__init__(init_args)
 
     def calc_label_total_loss(self, source_label_pooling, pos_label_pooling, neg_label_pooling):
-        batch_loss = torch.tensor(0.0, requires_grad=True).to(device=self.device)
+        losses = torch.tensor(0.0, requires_grad=True).to(device=self.hparams.device)
+        valid_batch = 0
         for b in range(len(source_label_pooling)):  # batchsizeの数だけループ
-            entire_source_emb = torch.zeros(self.bert.config.hidden_size).to(device=self.device)
-            entire_pos_emb = torch.zeros(self.bert.config.hidden_size).to(device=self.device)
-            entire_neg_emb = torch.zeros(self.bert.config.hidden_size).to(device=self.device)
+            entire_source_emb = torch.zeros(self.bert.config.hidden_size).to(device=self.hparams.device)
+            entire_pos_emb = torch.zeros(self.bert.config.hidden_size).to(device=self.hparams.device)
+            entire_neg_emb = torch.zeros(self.bert.config.hidden_size).to(device=self.hparams.device)
             for label in label_dict:
                 """
                 tripleに存在する観点のみ加えるパターン
@@ -55,16 +56,16 @@ class Specter(SpecterOrigin):
                 if not neg_label_pooling[b][label] == None:
                     entire_neg_emb += neg_label_pooling[b][label]
 
-            if not torch.equal(entire_source_emb, torch.zeros(self.bert.config.hidden_size).to(device=self.device)) and not torch.equal(entire_pos_emb, torch.zeros(self.bert.config.hidden_size).to(device=self.device)) and not torch.equal(entire_neg_emb, torch.zeros(self.bert.config.hidden_size).to(device=self.device)):
-                batch_loss += self.triple_loss(
+            if not torch.equal(entire_source_emb, torch.zeros(self.bert.config.hidden_size).to(device=self.hparams.device)) and not torch.equal(entire_pos_emb, torch.zeros(self.bert.config.hidden_size).to(device=self.hparams.device)) and not torch.equal(entire_neg_emb, torch.zeros(self.bert.config.hidden_size).to(device=self.hparams.device)):
+                losses += self.triple_loss(
                         entire_source_emb, entire_pos_emb, entire_neg_emb)
-            else:
-                batch_loss += torch.tensor(0.0, requires_grad=True)
-            
-            # print(batch_loss)
+                valid_batch += 1
+        
+        if valid_batch > 0:
+            return losses / valid_batch
+        else:
+            return losses
 
-        return batch_loss
-    
 
 def main():
     try:
@@ -89,13 +90,13 @@ def main():
         save_dir = f'/workspace/dataserver/model_outputs/specter/{args.version}/'
 
         # wandbの初期化
-        wandb.init(project=args.version, config=args)
+        wandb.init(project=args.version, config=args) # type: ignore
 
         # 学習のメインプログラム
         model = Specter(args).to(args.device)
         optimizer, scheduler = model.configure_optimizers()
-        train_loader = model._get_loader("train")
-        val_loader = model._get_loader("dev")
+        train_loader = model._get_loader("train", args.data_name)
+        val_loader = model._get_loader("dev", args.data_name)
 
         # val_loss = validate(model, val_loader, args.device)
         # print(f"Init, Val Loss: {val_loss}")
@@ -104,8 +105,6 @@ def main():
             val_loss = validate(model, val_loader, args.device)
             print(f"Epoch {epoch}, Val Loss: {val_loss}")
             save_checkpoint(model, optimizer,save_dir, f"ep-epoch={epoch}.pth.tar")
-        
-        wandb.finish()
 
         # 終了処理（LINE通知，casheとロギングの終了）
         line_notify("172.21.64.47:" + os.path.basename(__file__) + "が終了")
@@ -113,7 +112,7 @@ def main():
         model.eval()
         tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
         paperDict, sscPaperDict, outputEmbLabelDirPath = prepareData(args.version)
-        labeledAbstEmbedding = embedding(model, tokenizer, paperDict, sscPaperDict)
+        labeledAbstEmbedding = embedding(model, tokenizer, paperDict, sscPaperDict, args.device)
         save_embedding(labeledAbstEmbedding, outputEmbLabelDirPath)
         
         score_dict = eval_ranking_metrics(f"medium-{args.version}", '../dataserver/axcell/')
@@ -125,7 +124,9 @@ def main():
             score_dict['recall@10'], 
             score_dict['recall@20']
         ))
-
+        wandb.log(score_dict)
+        
+        wandb.finish()
         torch.cuda.empty_cache()
         
 

@@ -26,11 +26,11 @@ class SpecterAttnAspect(SpecterOrigin):
     def __init__(self, init_args={}):
         super().__init__(init_args)
         del self.attn_pooling
-        self.attn_title= AttnPhi(self.bert.config.hidden_size, is_key_transform=self.hparams.is_key_transform, device=self.device)
-        self.attn_bg = AttnPhi(self.bert.config.hidden_size, is_key_transform=self.hparams.is_key_transform, device=self.device)
-        # self.attn_obj = AttnPhi(self.bert.config.hidden_size, is_key_transform=self.hparams.is_key_transform, device=self.device)
-        self.attn_method = AttnPhi(self.bert.config.hidden_size, is_key_transform=self.hparams.is_key_transform, device=self.device)
-        self.attn_res = AttnPhi(self.bert.config.hidden_size, is_key_transform=self.hparams.is_key_transform, device=self.device)
+        self.attn_title= AttnPhi(self.bert.config.hidden_size, is_key_transform=self.hparams.is_key_transform, device=self.hparams.device)
+        self.attn_bg = AttnPhi(self.bert.config.hidden_size, is_key_transform=self.hparams.is_key_transform, device=self.hparams.device)
+        # self.attn_obj = AttnPhi(self.bert.config.hidden_size, is_key_transform=self.hparams.is_key_transform, device=self.hparams.device)
+        self.attn_method = AttnPhi(self.bert.config.hidden_size, is_key_transform=self.hparams.is_key_transform, device=self.hparams.device)
+        self.attn_res = AttnPhi(self.bert.config.hidden_size, is_key_transform=self.hparams.is_key_transform, device=self.hparams.device)
 
     def configure_optimizers(self):
         """Prepare optimizer and schedule (linear warmup and decay)"""        
@@ -124,7 +124,7 @@ class SpecterAttnAspect(SpecterOrigin):
                     label_last_hidden_state_tensor = torch.stack(
                         label_last_hidden_state[label])
                     lengths = torch.tensor([label_last_hidden_state_tensor.size(0)])
-                    label_last_hidden_state_padding_mask = make_pad_mask(lengths).to(device=self.device)
+                    label_last_hidden_state_padding_mask = make_pad_mask(lengths).to(device=self.hparams.device)
                     if label == 'bg':
                         label_pooling[label] = self.attn_bg(label_last_hidden_state_tensor.unsqueeze(0), label_last_hidden_state_padding_mask, self.hparams.is_key_transform)[0]
                     # elif label == 'obj':

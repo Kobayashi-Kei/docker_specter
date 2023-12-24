@@ -62,7 +62,7 @@ class AttnPhi(nn.Module):
         dropout = 0.1,
         num_heads = 8,
         is_key_transform = False, 
-        device,
+        device= 'cuda:0',
     ):
         """Attention pooling via query
 

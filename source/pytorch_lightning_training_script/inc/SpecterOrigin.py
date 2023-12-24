@@ -52,9 +52,9 @@ class SpecterOrigin(torch.nn.Module):
             self.triple_loss = TripletLoss(margin=float(init_args.margin))
 
         if hasattr(init_args, 'is_key_transform'):
-            self.attn_pooling = AttnPhi(self.bert.config.hidden_size, is_key_transform=self.hparams.is_key_transform, device=self.device)
+            self.attn_pooling = AttnPhi(self.bert.config.hidden_size, is_key_transform=self.hparams.is_key_transform, device=self.hparams.device)
         else:
-            self.attn_pooling = AttnPhi(self.bert.config.hidden_size, is_key_transform=False, device=self.device)
+            self.attn_pooling = AttnPhi(self.bert.config.hidden_size, is_key_transform=False, device=self.hparams.device)
         # トレーニング前のパラメータの値を保存
         self.attn_pooling_initial_params = {n: p.clone() for n, p in self.attn_pooling.named_parameters()}
         
@@ -284,7 +284,7 @@ class SpecterOrigin(torch.nn.Module):
                     # [false false true true]
                     # [false false false false]
                     lengths = torch.tensor([label_last_hidden_state_tensor.size(0)])
-                    label_last_hidden_state_padding_mask = make_pad_mask(lengths).to(device=self.device)
+                    label_last_hidden_state_padding_mask = make_pad_mask(lengths).to(device=self.hparams.device)
                     # print(label_last_hidden_state_tensor.unsqueeze(0).size())
                     # print(label_last_hidden_state_padding_mask)
                     label_pooling[label] = self.attn_pooling(label_last_hidden_state_tensor.unsqueeze(0), label_last_hidden_state_padding_mask, self.hparams.is_key_transform)[0]
