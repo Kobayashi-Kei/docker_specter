@@ -146,6 +146,7 @@ def main():
 
         # 学習のメインプログラム
         model = Specter(args).to(args.device)
+        tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
         optimizer, scheduler = model.configure_optimizers()
         train_loader = model._get_loader("train", args.data_name)
         val_loader = model._get_loader("dev", args.data_name)
@@ -153,7 +154,7 @@ def main():
         # val_loss = validate(model, val_loader, args.device)
         # print(f"Init, Val Loss: {val_loss}")
         for epoch in range(args.num_epochs):
-            train(model, train_loader, optimizer, scheduler, args.device, epoch, embedding)
+            train(model, tokenizer, train_loader, optimizer, scheduler, args.device, epoch, embedding)
             val_loss = validate(model, val_loader, args.device)
             print(f"Epoch {epoch}, Val Loss: {val_loss}")
             save_checkpoint(model, optimizer,save_dir, f"ep-epoch={epoch}.pth.tar")

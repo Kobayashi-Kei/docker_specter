@@ -117,21 +117,8 @@ def main():
     try:
         # 引数の取得，設定
         args = parse_args(arg_to_scheduler_choices, arg_to_scheduler_metavar)
-        random.seed(args.seed)
-        np.random.seed(args.seed)
-        torch.manual_seed(args.seed)
-        if args.num_workers == 0:
-            print("num_workers cannot be less than 1")
-            return
-
-        if torch.cuda.is_available():
-            torch.cuda.manual_seed_all(args.seed)
-        if ',' in args.gpus:
-            args.gpus = list(map(int, args.gpus.split(',')))
-            args.total_gpus = len(args.gpus)
-        else:
-            args.gpus = int(args.gpus)
-            args.total_gpus = args.gpus
+        initialize_environment(args)
+        args = calc_gpus(args)
 
         save_dir = f'/workspace/dataserver/model_outputs/specter/{args.version}/'
 
@@ -140,6 +127,7 @@ def main():
 
         # 学習のメインプログラム
         model = Specter(args).to(args.device)
+        tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
         optimizer, scheduler = model.configure_optimizers()
         train_loader = model._get_loader("train", args.data_name)
         val_loader = model._get_loader("dev", args.data_name)
@@ -147,34 +135,23 @@ def main():
         # val_loss = validate(model, val_loader, args.device)
         # print(f"Init, Val Loss: {val_loss}")
         for epoch in range(args.num_epochs):
-            train(model, train_loader, optimizer, scheduler, args.device, epoch, embedding)
+            train(model, tokenizer, train_loader, optimizer, scheduler, args.device, epoch, embedding)
             val_loss = validate(model, val_loader, args.device)
             print(f"Epoch {epoch}, Val Loss: {val_loss}")
             save_checkpoint(model, optimizer,save_dir, f"ep-epoch={epoch}.pth.tar")
         
 
+        # 評価
+        embedding_axcell(model, tokenizer, args.version, args.device)
+        eval_log_ranking_metrics(f"medium-{args.version}", '../dataserver/axcell/')
+        eval_log_similar_label(f"medium-{args.version}", "../dataserver/axcell/")
+        eval_log_CSFCube(model, tokenizer, args.device, args.version)
+
+
         # 終了処理（LINE通知，casheとロギングの終了）
-        line_notify("172.21.64.47:" + os.path.basename(__file__) + "が終了")
-
-        model.eval()
-        tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
-        paperDict, sscPaperDict, outputEmbLabelDirPath = prepareData(args.version)
-        labeledAbstEmbedding = embedding(model, tokenizer, paperDict, sscPaperDict, args.device)
-        save_embedding(labeledAbstEmbedding, outputEmbLabelDirPath)
-        
-        score_dict = eval_ranking_metrics(f"medium-{args.version}", '../dataserver/axcell/')
-
-        line_notify(args.version + ': ' + '{:.3f} {:.3f} {:.3f} {:.3f} {:.3f}\n'.format(
-            score_dict['mrr'], 
-            score_dict['map@10'], 
-            score_dict['map@20'], 
-            score_dict['recall@10'], 
-            score_dict['recall@20']
-        ))
-        wandb.log(score_dict)
-        
         wandb.finish()
         torch.cuda.empty_cache()
+        line_notify(os.path.basename(__file__) + "が終了")
         
 
     except Exception as e:

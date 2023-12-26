@@ -1,15 +1,23 @@
 import glob
 import json
-import torch
 import os
 import shutil
 import argparse
 import requests
-import wandb
+import numpy as np
+import random
+
+import torch
 from transformers import AutoTokenizer, AutoModel
+import wandb
+
 from inc.MyDataset import MyDataset
 from inc.run_labeled import eval_ranking_metrics
 from inc.const import label_dict
+
+from inc.run_labeled import eval_log_ranking_metrics
+from inc.csf_util import eval_log_CSFCube
+from inc.eval_similar_label import eval_log_similar_label
 
 # Axcellのデータサイズ(基本medium)
 size = "medium"
@@ -142,6 +150,10 @@ def save_embedding(labeledAbstEmbedding, outputEmbLabelDirPath):
     with open(outputEmbLabelDirPath + "labeledAbstSpecter.json", 'w') as f:
         json.dump(labeledAbstEmbedding, f, indent=4)
 
+def embedding_axcell(model, tokenizer, model_name, device):
+    paperDict, sscPaperDict, outputEmbLabelDirPath = prepareData(model_name)
+    labeledAbstEmbedding = embedding(model, tokenizer, paperDict, sscPaperDict, device)
+    save_embedding(labeledAbstEmbedding, outputEmbLabelDirPath)
 
 def parse_args(arg_to_scheduler_choices, arg_to_scheduler_metavar):
     parser = argparse.ArgumentParser()
@@ -185,6 +197,7 @@ def parse_args(arg_to_scheduler_choices, arg_to_scheduler_metavar):
                         type=str,
                         help="Learning rate scheduler")
     parser.add_argument("--data_name", default='axcell')
+    parser.add_argument('--tanh', default=False, action="store_true")
     parser.add_argument('--gpu', default=0)
 
     args = parser.parse_args()
@@ -201,6 +214,11 @@ def parse_args(arg_to_scheduler_choices, arg_to_scheduler_metavar):
                 args.dev_file = f
             elif 'test' in fname:
                 args.test_file = f
+
+    if args.num_workers == 0:
+        print("num_workers cannot be less than 1")
+        exit()
+    
     return args
 
 
@@ -227,7 +245,7 @@ def preprocess_batch(batch, device):
 
 
     
-def train(model, train_loader, optimizer, scheduler, device, epoch, embedding, is_track_score=True):
+def train(model, tokenizer, train_loader, optimizer, scheduler, device, epoch, embedding, is_track_score=True):
     model.train()
     for i, batch in enumerate(train_loader):
         # backwardパスを実行する前に常にそれまでに計算された勾配をクリアする
@@ -256,24 +274,13 @@ def train(model, train_loader, optimizer, scheduler, device, epoch, embedding, i
         
         wandb.log({f"bert_grad": calculate_gradient_norm(model.bert)})
 
-        # トレーニング後のパラメータの値と比較
-        # for name, param in model.attn_pooling.named_parameters():
-        #     if not torch.equal(model.attn_pooling_initial_params[name].to(device=device), param.to(device=device)):
-        #         print(f"Parameter {name} has changed.")
-        #         # exit()
+        # 評価
         if is_track_score:
-            """
-            評価
-            """
-            if i % 5000 == 0:
-                model.eval()
-                tokenizer = AutoTokenizer.from_pretrained("allenai/scibert_scivocab_cased")
-                paperDict, sscPaperDict, outputEmbLabelDirPath = prepareData(f"{model.hparams.version}-{str(i)}")
-                labeledAbstEmbedding = embedding(model, tokenizer, paperDict, sscPaperDict, device)
-                save_embedding(labeledAbstEmbedding, outputEmbLabelDirPath)
-            
-                score_dict = eval_ranking_metrics(f"medium-{model.hparams.version}-{str(i)}", '../dataserver/axcell/')
-                wandb.log(score_dict)
+            if i % 10000 == 0:
+                embedding_axcell(model, tokenizer, f"{model.hparams.version}-{str(i)}", device)
+                eval_log_ranking_metrics(f"medium-{model.hparams.version}-{str(i)}", '../dataserver/axcell/')
+                eval_log_similar_label(f"medium-{model.hparams.version}-{str(i)}", "../dataserver/axcell/")
+                eval_log_CSFCube(model, tokenizer, device, f"{model.hparams.version}-{str(i)}")
                 model.train()
 
 def validate(model, val_loader, device):
@@ -291,18 +298,9 @@ def validate(model, val_loader, device):
     return average_val_loss
 
 
-def eval_axcell():
-    model.eval()
-    tokenizer = AutoTokenizer.from_pretrained("allenai/scibert_scivocab_cased")
-    paperDict, sscPaperDict, outputEmbLabelDirPath = prepareData(f"{model.hparams.version}-{str(i)}")
-    labeledAbstEmbedding = embedding(model, tokenizer, paperDict, sscPaperDict, device)
-    save_embedding(labeledAbstEmbedding, outputEmbLabelDirPath)
-
-    score_dict = eval_ranking_metrics(f"medium-{model.hparams.version}-{str(i)}", '../dataserver/axcell/')
-    wandb.log(score_dict)
-    model.train()
-
 def embedding(model, tokenizer, paperDict, sscPaperDict, device): 
+    model.eval()
+
     # 出力用の辞書
     labeledAbstEmbedding = {}
 
@@ -343,3 +341,21 @@ def embedding(model, tokenizer, paperDict, sscPaperDict, device):
             labeledAbstEmbedding[title][label] = label_pooling[label].tolist()
     
     return labeledAbstEmbedding
+
+
+def initialize_environment(args):
+    random.seed(args.seed)
+    np.random.seed(args.seed)
+    torch.manual_seed(args.seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(args.seed)
+
+def calc_gpus(args):
+    if ',' in args.gpus:
+        args.gpus = list(map(int, args.gpus.split(',')))
+        args.total_gpus = len(args.gpus)
+    else:
+        args.gpus = int(args.gpus)
+        args.total_gpus = args.gpus
+    
+    return args

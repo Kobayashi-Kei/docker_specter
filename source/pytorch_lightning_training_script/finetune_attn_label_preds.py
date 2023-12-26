@@ -141,7 +141,7 @@ def main():
         # val_loss = validate(model, val_loader, args.device)
         # print(f"Init, Val Loss: {val_loss}")
         for epoch in range(args.num_epochs):
-            train(model, train_loader, optimizer, scheduler, args.device, epoch, embedding)
+            train(model, tokenizer, train_loader, optimizer, scheduler, args.device, epoch, embedding)
             val_loss = validate(model, val_loader, args.device)
             print(f"Epoch {epoch}, Val Loss: {val_loss}")
             save_checkpoint(model, optimizer,save_dir, f"ep-epoch={epoch}.pth.tar")

@@ -1,16 +1,17 @@
 import json
-
-from sklearn.feature_extraction.text import CountVectorizer
-from sklearn.feature_extraction.text import TfidfVectorizer
-from scipy.sparse import csr_matrix
-from sklearn.metrics.pairwise import cosine_similarity
-from ranx import evaluate
-from inc.recom import allPaperDataClass, testPaperDataClass
-from inc.recom import extractTestPaperEmbeddings, genQrels, genRun
 import numpy as np
 import datetime
-from sklearn.metrics.pairwise import euclidean_distances
+
+from scipy.sparse import csr_matrix
+from sklearn.feature_extraction.text import CountVectorizer
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
 from sklearn import preprocessing
+from ranx import evaluate
+import wandb
+
+from inc.recom import allPaperDataClass, testPaperDataClass
+from inc.recom import extractTestPaperEmbeddings, genQrels, genRun
 
 """
 関連研究推薦の実験
@@ -22,37 +23,23 @@ from sklearn import preprocessing
 
 
 def main():
-    """
-    引数を読み込み
-    """
-    # args = arg_parse_from_commandline(['method'])
-    # method = args.method
-
-    # if method != 'tf-idf' and \
-    #         method != 'bow' and \
-    #         method != 'Bert' and \
-    #         method != 'SciBert' and \
-    #         method != 'Specter':
-    #     print("Methodの引数が間違っています")
-    #     exit()
-    
     size = "medium"
-    # size = "small"
-    # size = "large"
-    # size = "medium-tf-idf-title_margin2"
-    # size = "medium-tf-idf-title_margin2_oneModel"
-    # size = "medium-lstm-margin2"
-    # size = "medium-lstm"
-    # size = "medium-average_pooling"
-    # size = "medium-pretrain_average_pooling"
-    # size = "medium-pretrain_lstm"
-    # size = "medium-pretrain_lstm_2023_10_16"
-    # size = "medium-pretrain_lstm_bertfix"
-    # size = 'medium-specter_average_pooling'
     size = 'medium-finetune_label-attn-scibert-vannila-1ep'
 
     dirPath = 'dataserver/axcell/'
     eval_ranking_metrics(size, dirPath)
+
+def eval_log_ranking_metrics(size, dirPath):
+    score_dict = eval_ranking_metrics(size, dirPath)
+    log_dict = {
+        'axcell_mrr': score_dict['mrr'], 
+        'axcell_map@10': score_dict['map@10'], 
+        'axcell_map@20': score_dict['map@20'], 
+        'axcell_recall@10': score_dict['recall@10'], 
+        'axcell_recall@20': score_dict['recall@20']
+    }
+    wandb.log(log_dict)
+    return log_dict
 
 def eval_ranking_metrics(size, dirPath):
     dt_now = datetime.datetime.now()

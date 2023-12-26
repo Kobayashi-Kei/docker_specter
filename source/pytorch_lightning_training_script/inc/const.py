@@ -24,6 +24,29 @@ num_label_dict = {
     "5": "res",
     "6": "other"
 }
+csf_label_dict = {
+    "title": 1,
+    "background_label": 2,
+    # "obj": 3, # objはbgに統合
+    "objective_label": 2,
+    "method_label": 4,
+    "result_label": 5,
+    "other_label": 6,
+}
+csf_num_label_dict = {
+    "1": "title",
+    "2": "background_label",
+    "3": "objective_label",
+    "4": "method_label",
+    "5": "result_label",
+    "6": "other_label"
+}
+csf_to_label = {
+    "title": "title",
+    "background": "bg",
+    "method": "method",
+    "result": "res",
+}
 
 arg_to_scheduler = {
     "linear": get_linear_schedule_with_warmup,
