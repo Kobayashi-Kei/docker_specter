@@ -100,7 +100,8 @@ def calc_dist(label, query, candidate, model, tokenizer, device):
     # cosine_similarityは Expected 2D array のため
 
     if query_label_pooled[csf_to_label[label]] != None and candidate_label_pooled[csf_to_label[label]] != None:
-        dist = F.cosine_similarity(query_label_pooled[csf_to_label[label]], candidate_label_pooled[csf_to_label[label]], dim=0)
+        # 距離だから1を類似度(−1<x<1)で引く
+        dist = 1-F.cosine_similarity(query_label_pooled[csf_to_label[label]], candidate_label_pooled[csf_to_label[label]], dim=0)
     else:
         # アブストがBERTの最大長を超え，かつlabelが最大長の中に存在しない場合
         # もしくはそもそもそのラベルが存在しない場合

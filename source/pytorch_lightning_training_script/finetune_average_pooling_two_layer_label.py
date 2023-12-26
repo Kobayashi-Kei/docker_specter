@@ -244,7 +244,7 @@ def train_this(model, tokenizer, train_loader, optimizer, scheduler, device, epo
             """
             評価
             """
-            if i % 10000 == 0:
+            if i % 20000 == 0:
                 embedding_axcell(model, tokenizer, f"{model.hparams.version}-{str(i)}", device)
                 eval_log_ranking_metrics(f"medium-{model.hparams.version}-{str(i)}", '../dataserver/axcell/')
                 eval_log_similar_label(f"medium-{model.hparams.version}-{str(i)}", "../dataserver/axcell/")
