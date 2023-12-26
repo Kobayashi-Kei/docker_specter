@@ -58,8 +58,7 @@ class Specter(SpecterAttnAspect):
                     #     source_label_pooling[b][label], pos_label_pooling[b][label], neg_label_pooling[b][label]))
                     # print(torch.tanh(loss))
                     if self.hparams.tanh:
-                        loss = torch.tanh(loss)
-                    
+                        loss = torch.tanh(loss*self.hparams.tanh_coefficient)
                     label_loss += loss
 
 

@@ -184,10 +184,12 @@ def parse_args(arg_to_scheduler_choices, arg_to_scheduler_metavar):
                         type=float, help="Epsilon for Adam optimizer.")
     parser.add_argument("--warmup_steps", default=0, type=int,
                         help="Linear warmup over warmup_steps.")
-    parser.add_argument("--num_workers", default=4, type=int,
+    parser.add_argument("--num_workers", default=1, type=int,
                         help="kwarg passed to DataLoader")
     parser.add_argument("--adafactor", action="store_true")
     parser.add_argument('--is_key_transform', default=False, action="store_true")
+    parser.add_argument('--tanh', default=False, action="store_true")
+    parser.add_argument('--tanh_coefficient', default=1.0, type=float)
 
     parser.add_argument('--num_samples', default=None, type=int)
     parser.add_argument("--lr_scheduler",
@@ -197,7 +199,6 @@ def parse_args(arg_to_scheduler_choices, arg_to_scheduler_metavar):
                         type=str,
                         help="Learning rate scheduler")
     parser.add_argument("--data_name", default='axcell')
-    parser.add_argument('--tanh', default=False, action="store_true")
     parser.add_argument('--gpu', default=0)
 
     args = parser.parse_args()

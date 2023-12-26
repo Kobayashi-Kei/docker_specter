@@ -201,7 +201,7 @@ class Specter(SpecterOrigin):
         #             exit()
         return batch_label_pooling
 
-def train_this(model, train_loader, optimizer, scheduler, device, epoch, embedding, is_track_score=True):
+def train_this(model, tokenizer, train_loader, optimizer, scheduler, device, epoch, embedding, is_track_score=True):
     model.train()
     for i, batch in enumerate(train_loader):
         # backwardパスを実行する前に常にそれまでに計算された勾配をクリアする
@@ -260,7 +260,6 @@ def main():
             val_loss = validate(model, val_loader, args.device)
             print(f"Epoch {epoch}, Val Loss: {val_loss}")
             save_checkpoint(model, optimizer,save_dir, f"ep-epoch={epoch}.pth.tar")
-        
         
 
         # 評価
