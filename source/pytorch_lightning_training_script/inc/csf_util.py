@@ -13,7 +13,7 @@ import inc.csf_ranking_eval as csf_rank
 def tokenize(title_abst, tokenizer):
     tokenized_text = tokenizer(
                 title_abst,
-                padding=True,
+                padding="max_length",
                 truncation=True,
                 return_tensors="pt",
                 max_length=512
@@ -69,6 +69,52 @@ def get_label_positions(paper, tokenizer):
 
     return list_None_to_int(label_positions)
 
+
+def get_label_positions_preds(paper, tokenizer):
+    # print(paper)
+    tokenized_input = tokenize(make_cls_title_sep_abst(paper, tokenizer), tokenizer)
+    # print(tokenized_input)
+
+    label_list_for_words = [[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0] for i in range(512)]
+
+    # titleの位置にラベルを格納する
+    # [SEP]の位置を特定する
+    sep_pos = tokenized_input['input_ids'][0].tolist().index(tokenizer.sep_token_id)
+    for i in range(1, sep_pos):
+        # label_list_for_words[i] = 'title'
+        label_list_for_words[i] = [0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    
+    # print(tokenized_input['input_ids'][0].size(0))
+    # 各トークンの観点をlabel_positionsに格納
+    for i, sentence in enumerate(paper['abstract']):
+        # 1文単位でtokenizeする
+        tokenized_sentence = tokenizer(
+            sentence,
+            return_tensors="pt",
+            max_length=512
+        )
+        # 先頭の101([CLS])と末尾の102([SEP])を取り除く
+        tokenized_text_input_ids = tokenized_sentence['input_ids'][0][1:-1].tolist()
+        start, end = find_subarray(
+            tokenized_input['input_ids'][0].tolist(), tokenized_text_input_ids)
+        # トークン数が512を超える場合はsubarrayが見つからない，breakしてそれ以降の情報は捨てる
+        if start == None and end == None:
+            break
+
+        # labelPreds(辞書)をリストに変える．indexがlabel_dictに対応([0, 0, bg, 0, method, res])
+        labelPredsIndex = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+        labelPreds = paper['pred_labels'][i]
+        for label, pred in labelPreds.items():
+            labelPredsIndex[int(label_dict[label])] += pred
+        
+        # たまに見つからないときがある（なぜ？）
+        if start and end:
+            for i in range(start, end+1):
+                label_list_for_words[i] = labelPredsIndex
+    # print(label_list_for_words)
+    # exit()
+    return label_list_for_words
+
 def find_subarray(arr, subarr):
     n = len(arr)
     m = len(subarr)
@@ -92,11 +138,22 @@ def gen_label_pooled_output(paper, model, tokenizer, device):
     
     return label_pooling
 
+def gen_label_pooled_output_preds(paper, model, tokenizer, device):
+    label_preds_positions = get_label_positions_preds(paper, tokenizer)
+    tokenized_input = tokenize(make_cls_title_sep_abst(paper, tokenizer), tokenizer).to(device)
+    label_pooling = model.forward(tokenized_input, torch.tensor(label_preds_positions).unsqueeze(0))[0]
+    
+    return label_pooling
 
-def calc_dist(label, query, candidate, model, tokenizer, device):
+
+def calc_dist(label, query, candidate, model, tokenizer, device, is_preds):
     # query
-    query_label_pooled = gen_label_pooled_output(query, model, tokenizer, device)
-    candidate_label_pooled = gen_label_pooled_output(candidate, model, tokenizer, device)
+    if is_preds:
+        query_label_pooled = gen_label_pooled_output_preds(query, model, tokenizer, device)
+        candidate_label_pooled = gen_label_pooled_output_preds(candidate, model, tokenizer, device)
+    else:
+        query_label_pooled = gen_label_pooled_output(query, model, tokenizer, device)
+        candidate_label_pooled = gen_label_pooled_output(candidate, model, tokenizer, device)
     # cosine_similarityは Expected 2D array のため
 
     if query_label_pooled[csf_to_label[label]] != None and candidate_label_pooled[csf_to_label[label]] != None:
@@ -110,8 +167,8 @@ def calc_dist(label, query, candidate, model, tokenizer, device):
     # print(dist)
     return dist
 
-def eval_log_CSFCube(model, tokenizer, device, model_name):
-    aggmetrics = eval_CSFCube(model, tokenizer, device, model_name)
+def eval_log_CSFCube(model, tokenizer, device, model_name, is_preds=False):
+    aggmetrics = eval_CSFCube(model, tokenizer, device, model_name, is_preds)
     log_dict = {
         'CSFCube_r_precision': aggmetrics['r_precision'], 
         'CSFCube_Precision@20': aggmetrics['precision'],
@@ -125,7 +182,7 @@ def eval_log_CSFCube(model, tokenizer, device, model_name):
     wandb.log(log_dict)
     return log_dict
 
-def eval_CSFCube(model, tokenizer, device, model_name):
+def eval_CSFCube(model, tokenizer, device, model_name, is_preds=False):
     original_directory = os.getcwd()
     os.chdir("../CSFCube")
     model.eval()
@@ -140,7 +197,11 @@ def eval_CSFCube(model, tokenizer, device, model_name):
     label_list = ['background', 'method', 'result']
     for label in label_list:
         pid2abstract = {}
-        with codecs.open('abstracts-csfcube-preds.jsonl', 'r', 'utf-8') as absfile:
+        if is_preds:
+            abstracts_path = 'abstracts-csfcube-preds-score.jsonl'
+        else:
+            abstracts_path = 'abstracts-csfcube-preds.jsonl'
+        with codecs.open(abstracts_path, 'r', 'utf-8') as absfile:
             for line in absfile:
                 injson = json.loads(line.strip())
                 pid2abstract[injson['paper_id']] = injson
@@ -156,7 +217,7 @@ def eval_CSFCube(model, tokenizer, device, model_name):
             query_cand_distance = []
             for cpid in cand_pids:
                 # print(pid2abstract[qpid], pid2abstract[cpid])
-                dist = calc_dist(label, pid2abstract[qpid], pid2abstract[cpid], model, tokenizer, device)
+                dist = calc_dist(label, pid2abstract[qpid], pid2abstract[cpid], model, tokenizer, device, is_preds)
                 # print(dist)
                 query_cand_distance.append([cpid, float(dist)])
             ranked_pool = list(sorted(query_cand_distance, key=lambda cd: cd[1]))

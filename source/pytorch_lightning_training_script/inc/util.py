@@ -11,7 +11,7 @@ import torch
 from transformers import AutoTokenizer, AutoModel
 import wandb
 
-from inc.MyDataset import MyDataset
+from inc.MyDataset import MyDataset, PredSscDataset
 from inc.run_labeled import eval_ranking_metrics
 from inc.const import label_dict
 
@@ -70,7 +70,7 @@ def calculate_gradient_norm(model, norm_type=2):
     total_norm = total_norm ** (1. / norm_type)
     return total_norm
 
-def prepareData(outputName):
+def prepareData(outputName, is_preds=False):
     # 出力（文埋め込み）
     outputDirPath = dirPath + "-" + outputName + "/"
     outputEmbLabelDirPath = outputDirPath + "embLabel/"
@@ -91,16 +91,23 @@ def prepareData(outputName):
     for title in labeledAbstDict:
         labeledAbstDict[title]["title"] = title
 
-    # SSCの結果をロード & 整形
-    with open(sscInputPath, 'r') as f:
-        sscInput = f.readlines()
-    with open(sscOutputPath, 'r') as f:
-        sscOutput = f.readlines()
+    if is_preds:
+        ssc_output_preds_path =  dirPath + "/result_ssc_preds.json"
+        ssc_paper_dict_preds = load_data(ssc_output_preds_path)
 
-    # アブスト分類の結果を読み込んで、扱いやすいように整形
-    sscPaperDict = preprocessSSC(sscOutput, sscInput)
+        return paperDict, ssc_paper_dict_preds, outputEmbLabelDirPath
+    
+    else:
+        # SSCの結果をロード & 整形
+        with open(sscInputPath, 'r') as f:
+            sscInput = f.readlines()
+        with open(sscOutputPath, 'r') as f:
+            sscOutput = f.readlines()
 
-    return paperDict, sscPaperDict, outputEmbLabelDirPath
+        # アブスト分類の結果を読み込んで、扱いやすいように整形
+        sscPaperDict = preprocessSSC(sscOutput, sscInput)
+
+        return paperDict, sscPaperDict, outputEmbLabelDirPath
 
     
 def preprocessSSC(sscOutput, sscInput):
@@ -150,10 +157,11 @@ def save_embedding(labeledAbstEmbedding, outputEmbLabelDirPath):
     with open(outputEmbLabelDirPath + "labeledAbstSpecter.json", 'w') as f:
         json.dump(labeledAbstEmbedding, f, indent=4)
 
-def embedding_axcell(model, tokenizer, model_name, device):
-    paperDict, sscPaperDict, outputEmbLabelDirPath = prepareData(model_name)
-    labeledAbstEmbedding = embedding(model, tokenizer, paperDict, sscPaperDict, device)
+def embedding_axcell(model, tokenizer, model_name, device, is_preds=False):
+    paperDict, sscPaperDict, outputEmbLabelDirPath = prepareData(model_name, is_preds)
+    labeledAbstEmbedding = embedding(model, tokenizer, paperDict, sscPaperDict, device, is_preds)
     save_embedding(labeledAbstEmbedding, outputEmbLabelDirPath)
+
 
 def parse_args(arg_to_scheduler_choices, arg_to_scheduler_metavar):
     parser = argparse.ArgumentParser()
@@ -299,13 +307,16 @@ def validate(model, val_loader, device):
     return average_val_loss
 
 
-def embedding(model, tokenizer, paperDict, sscPaperDict, device): 
+def embedding(model, tokenizer, paperDict, sscPaperDict, device, is_preds=False): 
     model.eval()
 
     # 出力用の辞書
     labeledAbstEmbedding = {}
 
-    my_dataset = MyDataset(None, None, None, label_dict=label_dict)
+    if is_preds:
+        my_dataset = PredSscDataset(None, None, None, label_dict=label_dict)
+    else:
+        my_dataset = MyDataset(None, None, None, label_dict=label_dict)
 
     # 埋め込み
     for title, paper in paperDict.items():
@@ -317,7 +328,7 @@ def embedding(model, tokenizer, paperDict, sscPaperDict, device):
             tokenizer.sep_token + (paper.get('abstract') or '')
         input = tokenizer(
             title_abs,
-            padding=True,
+            padding="max_length",
             truncation=True,
             return_tensors="pt",
             max_length=512
@@ -331,10 +342,15 @@ def embedding(model, tokenizer, paperDict, sscPaperDict, device):
 
         # print(title_abs)
         # print(ssc)
-        _, label_list_for_words = my_dataset.tokenize_with_label(title_abs, ssc, tokenizer)
-        label_pooling = model.label_pooling(output, torch.tensor([label_list_for_words]))[0]
+        if is_preds:
+            _, label_preds_list_for_words = my_dataset.tokenize_with_label(title_abs, ssc, tokenizer)
+            label_pooling = model.label_pooling(output, torch.tensor([label_preds_list_for_words]))[0]
+        else:
+            _, label_list_for_words = my_dataset.tokenize_with_label(title_abs, ssc, tokenizer)
+            label_pooling = model.label_pooling(output, torch.tensor([label_list_for_words]))[0]
 
         for label in labelList:
+            if label == 'obj': continue
             if label_pooling[label] == None or len(label_pooling[label]) == 0:
                 labeledAbstEmbedding[title][label] = None
                 continue

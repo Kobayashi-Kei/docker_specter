@@ -113,12 +113,13 @@ def calculate_similarity(vector1, vector2):
 
 # 最も類似する観点を特定する関数
 def find_most_similar_aspect(query_paper, candidate_paper):
-    aspects = ["bg", "obj", "method", "res"]
+    # aspects = ["bg", "obj", "method", "res"]
+    labels = ["bg", "method", "res"]
     similarity_scores = {}
 
-    for aspect in aspects:
-        if query_paper[aspect] != None and candidate_paper[aspect] != None:
-            similarity_scores[aspect] = calculate_similarity(query_paper[aspect], candidate_paper[aspect])
+    for label in labels:
+        if query_paper[label] != None and candidate_paper[label] != None:
+            similarity_scores[label] = calculate_similarity(query_paper[label], candidate_paper[label])
     
     # romdom baseline
     # random_int =  random.randint(0, len(similarity_scores.keys())-1)

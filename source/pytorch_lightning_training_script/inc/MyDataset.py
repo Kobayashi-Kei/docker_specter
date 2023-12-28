@@ -3,6 +3,7 @@ from torch import tensor
 import re
 import traceback
 
+from inc.const import label_dict
 
 class MyDataset(Dataset):
     """観点の情報が付与された論文推薦データセットを扱うクラス
@@ -123,7 +124,7 @@ class MyDataset(Dataset):
     def tokenize_with_label(self, sentence, ssc_result, tokenizer):
         tokenized_input = tokenizer(
             sentence,
-            padding=True,
+            padding="max_length",
             truncation=True,
             return_tensors="pt",
             max_length=512
@@ -196,7 +197,7 @@ class MyDataset(Dataset):
     def tokenize_with_label_title_only(self, sentence, tokenizer):
         tokenized_input = tokenizer(
             sentence,
-            padding=True,
+            padding="max_length",
             truncation=True,
             return_tensors="pt",
             max_length=512
@@ -219,13 +220,108 @@ class MyDataset(Dataset):
     
 
 class PredSscDataset(MyDataset):
-    def __init__(self, data, paper_dict, ssc_result_dict, label_dict, tokenizer=None, block_size=100):
-        super().__init__(data, paper_dict, ssc_result_dict, label_dict, tokenizer, block_size)
+    # override
+    def retTransformersInput_mukou(self, data_instance, tokenizer):
+        # print("data_instance: ", data_instance)
+        source_title = re.sub(r'\s+', ' ', data_instance["source"])
+        pos_title = re.sub(r'\s+', ' ', data_instance["pos"])
+        neg_title = re.sub(r'\s+', ' ', data_instance["neg"])
+
+        # debug
+        # print(f'source_title: {source_title}')
+        # print(f'source_abst: {self.paper_dict[source_title]["abstract"]}')
+
+        source_title_abs = self.paper_dict[source_title]["title"] + \
+            tokenizer.sep_token + \
+            self.paper_dict[source_title]["abstract"]
+        sourceEncoded = self.tokenizer(
+            source_title_abs,
+            padding="max_length",
+            return_tensors="pt",
+            truncation=True,
+            max_length=512,
+        )
+
+        pos_title_abs = self.paper_dict[pos_title]["title"] + \
+            tokenizer.sep_token + \
+            self.paper_dict[pos_title]["abstract"]
+        posEncoded = self.tokenizer(
+            pos_title_abs,
+            padding="max_length",
+            return_tensors="pt",
+            truncation=True,
+            max_length=512,
+        )
+        neg_title_abs = self.paper_dict[neg_title]["title"] + \
+            tokenizer.sep_token + \
+            self.paper_dict[neg_title]["abstract"]
+        negEncoded = self.tokenizer(
+            neg_title_abs,
+            padding="max_length",
+            return_tensors="pt",
+            truncation=True,
+            max_length=512,
+        )
+        source_input = {
+            'input_ids': sourceEncoded["input_ids"][0],
+            'attention_mask': sourceEncoded["attention_mask"][0],
+            'token_type_ids': sourceEncoded["token_type_ids"][0]
+        }
+        pos_input = {
+            'input_ids': posEncoded["input_ids"][0],
+            'attention_mask': posEncoded["attention_mask"][0],
+            'token_type_ids': posEncoded["token_type_ids"][0]
+        }
+        neg_input = {
+            'input_ids': negEncoded["input_ids"][0],
+            'attention_mask': negEncoded["attention_mask"][0],
+            'token_type_ids': negEncoded["token_type_ids"][0]
+        }
+
+        # SPECTER データで本文が無くてSSCができなかったケースに対応
+        if not source_title in self.ssc_result_dict:
+            # titleのみラベルポジションを付与
+            # ex. [-1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, -1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,....]
+            source_position_label = self.tokenize_with_label_title_only(
+                source_title_abs, self.tokenizer)
+        else:
+            source_position_label = self.tokenize_with_label(
+                source_title_abs, self.ssc_result_dict[source_title], self.tokenizer)
+        if not pos_title in self.ssc_result_dict:
+            pos_position_label = self.tokenize_with_label_title_only(
+                pos_title_abs, self.tokenizer)
+        else:
+            pos_position_label = self.tokenize_with_label(
+                pos_title_abs, self.ssc_result_dict[pos_title], self.tokenizer)
+        if not neg_title in self.ssc_result_dict:
+            neg_position_label = self.tokenize_with_label_title_only(
+                neg_title_abs, self.tokenizer)
+        else:
+            neg_position_label = self.tokenize_with_label(
+                neg_title_abs, self.ssc_result_dict[neg_title], self.tokenizer)
+
+        ret_source = {
+            "input": source_input,
+            "position_label_list": source_position_label[1]
+        }
+        ret_pos = {
+            "input": pos_input,
+            "position_label_list": pos_position_label[1]
+        }
+        ret_neg = {
+            "input": neg_input,
+            "position_label_list": neg_position_label[1]
+        }
+
+        print(ret_source)
+
+        print(source_title,', \n'  , pos_title,', \n' , neg_title,', \n' )
+        return ret_source, ret_pos, ret_neg
 
     def tokenize_with_label(self, sentence, ssc_result, tokenizer):
         tokenized_input = tokenizer(
             sentence,
-            padding=True,
+            padding="max_length",
             truncation=True,
             return_tensors="pt",
             max_length=512
@@ -237,26 +333,24 @@ class PredSscDataset(MyDataset):
 
         # 最大長に合わせる
         # 【注意】 0ではなくNoneを入れていたところデータローダーの制約に引っかかってエラーとなる
-        label_list_for_words = [0 for i in range(512)]
+        label_list_for_words = [[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0] for i in range(512)]
 
         # titleの位置にラベルを格納する
         # [SEP]の位置を特定する
         sep_pos = tokenized_input['input_ids'][0].tolist().index(tokenizer.sep_token_id)
         for i in range(1, sep_pos):
             # label_list_for_words[i] = 'title'
-            label_list_for_words[i] = 1
+            label_list_for_words[i] = [0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 
         # [SEP]と[CLS]は-1
-        label_list_for_words[0] = -1
-        label_list_for_words[sep_pos] = -1
+        label_list_for_words[0] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+        label_list_for_words[sep_pos] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
         try:
             # 各単語の観点をlabel_positionsに格納
+            # print(ssc_result)
             for text_label_pair in ssc_result:
                 text = text_label_pair[0]
                 labelPreds = text_label_pair[1]
-                print(labelPreds)
-                exit()
-
                 # 1文単位でtokenizeする
                 tokenizedText = tokenizer(
                     text,
@@ -268,10 +362,16 @@ class PredSscDataset(MyDataset):
 
                 start, end = self.find_subarray(
                     tokenized_input['input_ids'][0].tolist(), tokenizedText_input_ids)
+                
+                # labelPreds(辞書)をリストに変える．indexがlabel_dictに対応([0, 0, bg, 0, method, res])
+                labelPredsIndex = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+                for label, pred in labelPreds.items():
+                    labelPredsIndex[int(label_dict[label])] += pred
+                
                 # たまに見つからないときがある（なぜ？）
                 if start and end:
                     for i in range(start, end+1):
-                        label_list_for_words[i] = label
+                        label_list_for_words[i] = labelPredsIndex
 
             return tokenized_input, label_list_for_words
 
