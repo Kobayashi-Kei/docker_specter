@@ -3,7 +3,7 @@ import wandb
 import random
 import statistics
 
-from recom import allPaperDataClass, testPaperDataClass
+from inc.recom import allPaperDataClass, testPaperDataClass
 from sklearn.metrics.pairwise import cosine_similarity
 
 
@@ -20,15 +20,15 @@ def main():
     eval_similar_label(embedding_dir, '/workspace/dataserver/axcell/')
 
     # random eval
-    sum = 10
-    match_all = []
-    inclusion_all = []
-    for i in range(sum):
-        acc__match, acc_inclusion = eval_similar_label(embedding_dir, '/workspace/dataserver/axcell/')
-        match_all.append(acc__match)
-        inclusion_all.append(acc_inclusion)
+    # sum = 10
+    # match_all = []
+    # inclusion_all = []
+    # for i in range(sum):
+    #     acc__match, acc_inclusion = eval_similar_label(embedding_dir, '/workspace/dataserver/axcell/')
+    #     match_all.append(acc__match)
+    #     inclusion_all.append(acc_inclusion)
 
-    print(statistics.mean(match_all), statistics.mean(inclusion_all))
+    # print(statistics.mean(match_all), statistics.mean(inclusion_all))
 
 def load_data(path):
     with open(path, 'r') as f:
@@ -96,9 +96,9 @@ def eval_similar_label(embedding_dir, dirPath):
             if len(query_paper["similar_label"][i]) == 0:
                 continue
 
-            print('---------------------------------')
-            print(query_paper["title"])
-            print(cited_paper_title)
+            # print('---------------------------------')
+            # print(query_paper["title"])
+            # print(cited_paper_title)
 
             # 一致判定
             result = hantei_match(query_paper_emb, cited_paper_emb, query_paper["similar_label"][i])
