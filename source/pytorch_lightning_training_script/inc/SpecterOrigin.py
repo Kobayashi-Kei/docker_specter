@@ -11,6 +11,7 @@ import torch
 # basic python packages
 import json
 from argparse import Namespace
+import csv
 
 # inc
 from inc.MyDataset import MyDataset
@@ -82,10 +83,6 @@ class SpecterOrigin(torch.nn.Module):
 
         return label_pooling
 
-    """
-    このメソッドでallennlp用のデータをロードして、トークナイズまで行う（tokentype_id, attention_maskなど)
-    -> つまりこのメソッドに関わる箇所を書き換えればいい。
-    """
     def _get_loader(self, split, data_name='axcell'):
         # Axcell データ
         if data_name == 'axcell':
@@ -112,6 +109,35 @@ class SpecterOrigin(torch.nn.Module):
                 paper_dict = json.load(f)
 
             path = "/workspace/dataserver/specterData/label/" + split + "/result_ssc.json"
+            with open(path, 'r') as f:
+                ssc_result_dict = json.load(f)
+
+        # SciNCL データ
+        elif data_name == 'scincl':
+            path = "/workspace/dataserver/scincl/" + split + "_metadata.jsonl"
+            paper_dict = {}
+            paper_id_to_title = {}
+            with open(path, 'r') as f:
+                for line in f:
+                    paper_jsonl = json.loads(line)
+                    if paper_jsonl['abstract'] == None:
+                        paper_jsonl['abstract'] = ''
+                    paper_dict[paper_jsonl["title"]] = paper_jsonl
+                    paper_id_to_title[paper_jsonl['paper_id']] = paper_jsonl["title"]
+
+            data = []
+            path = "/workspace/dataserver/scincl/" + split + "_triples.csv"
+            with open(path, newline='', encoding='utf-8') as csvfile:
+                reader = csv.DictReader(csvfile, fieldnames=['source', 'pos', 'neg'])
+                next(reader)  # 最初の行（ヘッダー）をスキップする
+                for row in reader:
+                    data.append({
+                        "source": paper_id_to_title[row['source']],
+                        "pos": paper_id_to_title[row['pos']],
+                        "neg": paper_id_to_title[row['neg']]
+                    })
+
+            path = "/workspace/dataserver/scincl/result_ssc.json"
             with open(path, 'r') as f:
                 ssc_result_dict = json.load(f)
 

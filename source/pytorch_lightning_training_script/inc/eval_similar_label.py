@@ -1,8 +1,9 @@
 import json
-
 import wandb
+import random
+import statistics
 
-from inc.recom import allPaperDataClass, testPaperDataClass
+from recom import allPaperDataClass, testPaperDataClass
 from sklearn.metrics.pairwise import cosine_similarity
 
 
@@ -14,9 +15,20 @@ def main():
     embedding_dir = "medium"
     embedding_dir = "medium-openai"
     # embedding_dir = "medium-finetune_specter_label-attn_aspect_specific_average__key_transform_margin1-lr2e-6-200"
-    embedding_dir = "medium-pretrain_label-attn_aspect_specific_average_key_transform_margin2-lr2e-6-340000"
+    # embedding_dir = "medium-pretrain_label-lstm_aspect_specific-margin2-lr2e-6-340000"
 
-    eval_similar_label(embedding_dir)
+    eval_similar_label(embedding_dir, '/workspace/dataserver/axcell/')
+
+    # random eval
+    sum = 10
+    match_all = []
+    inclusion_all = []
+    for i in range(sum):
+        acc__match, acc_inclusion = eval_similar_label(embedding_dir, '/workspace/dataserver/axcell/')
+        match_all.append(acc__match)
+        inclusion_all.append(acc_inclusion)
+
+    print(statistics.mean(match_all), statistics.mean(inclusion_all))
 
 def load_data(path):
     with open(path, 'r') as f:
@@ -104,6 +116,11 @@ def eval_similar_label(embedding_dir, dirPath):
     # print(embedding_dir)
     # print(f"Correct: {correct_match}, Incorrect: {incorrect_match}")
     # print(f"Accuracy: {accuracy_match * 100:.2f}%")
+
+    # print('================ result ================')
+    # print(embedding_dir)
+    # print(f"Correct: {correct_inclusion}, Incorrect: {incorrect_inclusion}")
+    # print(f"Accuracy: {accuracy_inclusion * 100:.2f}%")
 
     return accuracy_match, accuracy_inclusion
 

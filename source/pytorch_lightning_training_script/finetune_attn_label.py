@@ -29,11 +29,6 @@ from inc.eval_similar_label import eval_log_similar_label
 import wandb
 
 
-"""
-単語位置出力を観点ごとにaverage poolingして観点埋め込みを生成し，
-Finetuning
-"""
-
 class Specter(SpecterOrigin):
     def __init__(self, init_args={}):
         super().__init__(init_args)
@@ -45,6 +40,7 @@ class Specter(SpecterOrigin):
             label_loss = 0
             valid_label_list = []
             for label in label_dict:
+                if label=='other':continue
                 if not source_label_pooling[b][label] == None and not pos_label_pooling[b][label] == None and not neg_label_pooling[b][label] == None:
                     valid_label_list.append(label)
                     label_loss += self.triple_loss(
@@ -79,14 +75,16 @@ def main():
         tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
         optimizer, scheduler = model.configure_optimizers()
         train_loader = model._get_loader("train", args.data_name)
-        val_loader = model._get_loader("dev", args.data_name)
+        if args.data_name != 'scincl':
+            val_loader = model._get_loader("dev", args.data_name)
 
         # val_loss = validate(model, val_loader, args.device)
         # print(f"Init, Val Loss: {val_loss}")
         for epoch in range(args.num_epochs):
             train(model, tokenizer, train_loader, optimizer, scheduler, args.device, epoch, embedding)
-            val_loss = validate(model, val_loader, args.device)
-            print(f"Epoch {epoch}, Val Loss: {val_loss}")
+            if args.data_name != 'scincl':
+                val_loss = validate(model, val_loader, args.device)
+                print(f"Epoch {epoch}, Val Loss: {val_loss}")
             save_checkpoint(model, optimizer,save_dir, f"ep-epoch={epoch}.pth.tar")
 
         # 評価
