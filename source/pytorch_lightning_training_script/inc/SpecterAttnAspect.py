@@ -2,25 +2,16 @@
 from transformers.optimization import (
     Adafactor,
 )
-from transformers import AutoTokenizer, AutoModel
 from transformers import AdamW
-
-from torch.utils.data import DataLoader
 import torch
 
 # basic python packages
-import json
-from argparse import Namespace
 
 # inc
-from inc.MyDataset import MyDataset
-from inc.TripletLoss import TripletLoss
 from inc.qkv_pooling import AttnPhi, make_pad_mask
 from inc.const import label_dict, num_label_dict
-from inc.const import arg_to_scheduler, arg_to_scheduler_choices, arg_to_scheduler_metavar
-from inc.const import tokenizer_name
 from inc.SpecterOrigin import SpecterOrigin
-
+from inc.MyDataset import PredSscDataset
 
 class SpecterAttnAspect(SpecterOrigin):
     def __init__(self, init_args={}):

@@ -254,7 +254,7 @@ def preprocess_batch(batch, device):
 
 
     
-def train(model, tokenizer, train_loader, optimizer, scheduler, device, epoch, embedding, is_track_score=True):
+def train(model, tokenizer, train_loader, optimizer, scheduler, device, epoch, embedding, is_track_score=True, is_preds=False):
     model.train()
     for i, batch in enumerate(train_loader):
         # backwardパスを実行する前に常にそれまでに計算された勾配をクリアする
@@ -286,10 +286,10 @@ def train(model, tokenizer, train_loader, optimizer, scheduler, device, epoch, e
         # 評価
         if is_track_score:
             if i % 20000 == 0:
-                embedding_axcell(model, tokenizer, f"{model.hparams.version}-{str(i)}", device)
+                embedding_axcell(model, tokenizer, f"{model.hparams.version}-{str(i)}", device, is_preds=True)
                 eval_log_ranking_metrics(f"medium-{model.hparams.version}-{str(i)}", '../dataserver/axcell/')
                 eval_log_similar_label(f"medium-{model.hparams.version}-{str(i)}", "../dataserver/axcell/")
-                eval_log_CSFCube(model, tokenizer, device, f"{model.hparams.version}-{str(i)}")
+                eval_log_CSFCube(model, tokenizer, device, f"{model.hparams.version}-{str(i)}", is_preds=True)
                 model.train()
 
 def validate(model, val_loader, device):

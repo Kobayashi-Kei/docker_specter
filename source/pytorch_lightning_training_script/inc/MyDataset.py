@@ -221,7 +221,7 @@ class MyDataset(Dataset):
 
 class PredSscDataset(MyDataset):
     # override
-    def retTransformersInput_mukou(self, data_instance, tokenizer):
+    def retTransformersInput(self, data_instance, tokenizer):
         # print("data_instance: ", data_instance)
         source_title = re.sub(r'\s+', ' ', data_instance["source"])
         pos_title = re.sub(r'\s+', ' ', data_instance["pos"])
@@ -302,18 +302,16 @@ class PredSscDataset(MyDataset):
 
         ret_source = {
             "input": source_input,
-            "position_label_list": source_position_label[1]
+            "position_label_list": tensor(source_position_label[1])
         }
         ret_pos = {
             "input": pos_input,
-            "position_label_list": pos_position_label[1]
+            "position_label_list": tensor(pos_position_label[1])
         }
         ret_neg = {
             "input": neg_input,
-            "position_label_list": neg_position_label[1]
+            "position_label_list": tensor(neg_position_label[1])
         }
-
-        print(ret_source)
 
         print(source_title,', \n'  , pos_title,', \n' , neg_title,', \n' )
         return ret_source, ret_pos, ret_neg
