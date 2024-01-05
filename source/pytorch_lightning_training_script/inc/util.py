@@ -198,6 +198,7 @@ def parse_args(arg_to_scheduler_choices, arg_to_scheduler_metavar):
     parser.add_argument('--is_key_transform', default=False, action="store_true")
     parser.add_argument('--tanh', default=False, action="store_true")
     parser.add_argument('--tanh_coefficient', default=1.0, type=float)
+    parser.add_argument("--loss_type", default='normal')
 
     parser.add_argument('--num_samples', default=None, type=int)
     parser.add_argument("--lr_scheduler",
@@ -286,10 +287,10 @@ def train(model, tokenizer, train_loader, optimizer, scheduler, device, epoch, e
         # 評価
         if is_track_score:
             if i % 20000 == 0:
-                embedding_axcell(model, tokenizer, f"{model.hparams.version}-{str(i)}", device, is_preds=True)
+                embedding_axcell(model, tokenizer, f"{model.hparams.version}-{str(i)}", device, is_preds=is_preds)
                 eval_log_ranking_metrics(f"medium-{model.hparams.version}-{str(i)}", '../dataserver/axcell/')
                 eval_log_similar_label(f"medium-{model.hparams.version}-{str(i)}", "../dataserver/axcell/")
-                eval_log_CSFCube(model, tokenizer, device, f"{model.hparams.version}-{str(i)}", is_preds=True)
+                eval_log_CSFCube(model, tokenizer, device, f"{model.hparams.version}-{str(i)}", is_preds=is_preds)
                 model.train()
 
 def validate(model, val_loader, device):

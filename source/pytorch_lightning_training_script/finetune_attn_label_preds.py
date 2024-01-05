@@ -43,10 +43,21 @@ class Specter(SpecterAttnPreds):
                 if label=='other' or label == 'obj':continue
                 if not source_label_pooling[b][label] == None and not pos_label_pooling[b][label] == None and not neg_label_pooling[b][label] == None:
                     valid_label_list.append(label)
-                    label_loss += self.triple_loss(
-                        source_label_pooling[b][label], pos_label_pooling[b][label], neg_label_pooling[b][label])
-                    # label_loss += torch.tanh(self.triple_loss(
-                    #     source_label_pooling[b][label], pos_label_pooling[b][label], neg_label_pooling[b][label]))
+                    if self.hparams.loss_type == "normal":
+                        label_loss += self.triple_loss(
+                            source_label_pooling[b][label], pos_label_pooling[b][label], neg_label_pooling[b][label])
+                        # print(self.triple_loss(
+                        #     source_label_pooling[b][label], pos_label_pooling[b][label], neg_label_pooling[b][label]))
+                    elif self.hparams.loss_type == 'tanh':
+                        label_loss += torch.tanh(self.triple_loss(
+                            source_label_pooling[b][label], pos_label_pooling[b][label], neg_label_pooling[b][label])*self.hparams.tanh_coefficient)
+                        # print(torch.tanh(self.triple_loss(
+                        #     source_label_pooling[b][label], pos_label_pooling[b][label], neg_label_pooling[b][label])*self.hparams.tanh_coefficient))
+                    elif self.hparams.loss_type == 'log':
+                        label_loss += torch.log(self.triple_loss(
+                            source_label_pooling[b][label], pos_label_pooling[b][label], neg_label_pooling[b][label]) + 1.0)
+                        # print(torch.log(self.triple_loss(
+                        #     source_label_pooling[b][label], pos_label_pooling[b][label], neg_label_pooling[b][label]) + 1.0))
 
             if len(valid_label_list) > 0:
                 losses += label_loss/len(valid_label_list)
